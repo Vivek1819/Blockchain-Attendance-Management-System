@@ -560,6 +560,12 @@ class BlockchainManager {
             data.students[id] = chain.toJSON();
         }
 
+        // Ensure data directory exists
+        const dataDir = path.dirname(this.dataPath);
+        if (!fs.existsSync(dataDir)) {
+            fs.mkdirSync(dataDir, { recursive: true });
+        }
+
         fs.writeFileSync(this.dataPath, JSON.stringify(data, null, 2));
         console.log('Blockchain data saved successfully');
     }
