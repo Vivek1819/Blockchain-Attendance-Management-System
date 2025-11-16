@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blockchain Attendance Management System</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .tabs {
+            display: flex;
+            background: #f5f5f5;
+            border-bottom: 2px solid #ddd;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 15px;
+            text-align: center;
+            cursor: pointer;
+            border: none;
+            background: transparent;
+            font-size: 1em;
+            font-weight: 600;
+            transition: all 0.3s;
+            color: #666;
+        }
+
+        .tab:hover {
+            background: #e0e0e0;
+        }
+
+        .tab.active {
+            background: white;
+            color: #667eea;
+            border-bottom: 3px solid #667eea;
+        }
+
+        .tab-content {
+            display: none;
+            padding: 30px;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .stat-card h3 {
+            font-size: 2.5em;
+            margin-bottom: 5px;
+        }
+
+        .stat-card p {
+            opacity: 0.9;
+            font-size: 1em;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 1em;
+            transition: border-color 0.3s;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-right: 10px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-warning {
+            background: #ffc107;
+            color: #333;
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+
+        table th,
+        table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+
+        table th {
+            background: #f5f5f5;
+            font-weight: 600;
+            color: #333;
+        }
+
+        table tr:hover {
+            background: #f9f9f9;
+        }
+
+        .message {
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+            display: none;
+        }
+
+        .message.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .message.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .message.show {
+            display: block;
+        }
+
+        .blockchain-viewer {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+
+        .block {
+            background: white;
+            border: 2px solid #667eea;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+
+        .block h4 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .block-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            font-size: 0.9em;
+        }
+
+        .block-info div {
+            padding: 5px;
+        }
+
+        .block-info strong {
+            color: #333;
+        }
+
+        .hash {
+            font-family: monospace;
+            word-break: break-all;
+            font-size: 0.85em;
+            color: #666;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #667eea;
+            font-size: 1.2em;
+        }
+
+        .search-bar {
+            margin-bottom: 20px;
+        }
+
+        .search-bar input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 1em;
+        }
+
+        .attendance-grid {
+            display: grid;
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .student-attendance {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 8px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .student-info {
+            flex: 1;
+        }
+
+        .student-info h4 {
+            margin-bottom: 5px;
+            color: #333;
+        }
+
+        .student-info p {
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .attendance-buttons {
+            display: flex;
+            gap: 10px;
+        }
+
+        .attendance-buttons button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .btn-present {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-absent {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-leave {
+            background: #ffc107;
+            color: #333;
+        }
+
+        .validation-result {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+
+        .validation-result.valid {
+            border-left: 5px solid #28a745;
+        }
+
+        .validation-result.invalid {
+            border-left: 5px solid #dc3545;
+        }
+
+        .tree-container {
+            background: #f9f9f9;
+            padding: 30px;
+            border-radius: 10px;
+            margin-top: 20px;
+            overflow-x: auto;
+        }
+
+        .tree-diagram {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .tree-level {
+            display: flex;
+            justify-content: center;
+            gap: 60px;
+            margin: 20px 0;
+            position: relative;
+        }
+
+        .tree-branch {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+        }
+
+        .tree-node {
+            padding: 15px 25px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            text-align: center;
+            min-width: 180px;
+            position: relative;
+            border: 3px solid;
+        }
+
+        .tree-node.layer-1 {
+            border-color: #4CAF50;
+            background: linear-gradient(135deg, #E8F5E9 0%, #C8E6C9 100%);
+        }
+
+        .tree-node.layer-2 {
+            border-color: #2196F3;
+            background: linear-gradient(135deg, #E3F2FD 0%, #BBDEFB 100%);
+        }
+
+        .tree-node.layer-3 {
+            border-color: #FF9800;
+            background: linear-gradient(135deg, #FFF3E0 0%, #FFE0B2 100%);
+        }
+
+        .tree-node-title {
+            font-weight: 700;
+            font-size: 1em;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .tree-node-id {
+            color: #666;
+            font-size: 0.85em;
+            font-family: monospace;
+        }
+
+        .tree-node-info {
+            font-size: 0.75em;
+            color: #888;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid rgba(0,0,0,0.1);
+        }
+
+        .tree-line-v {
+            width: 3px;
+            height: 40px;
+            background: #999;
+            margin: 0 auto;
+        }
+
+        .tree-line-h {
+            position: absolute;
+            height: 3px;
+            background: #999;
+            top: -40px;
+        }
+
+        .tree-children {
+            display: flex;
+            gap: 40px;
+            margin-top: 40px;
+            position: relative;
+        }
+
+        .tree-children::before {
+            content: '';
+            position: absolute;
+            top: -40px;
+            left: 50%;
+            width: 3px;
+            height: 40px;
+            background: #999;
+            transform: translateX(-50%);
+        }
+
+        .tree-child-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+        }
+
+        .tree-child-group::before {
+            content: '';
+            position: absolute;
+            top: -40px;
+            left: 50%;
+            width: 3px;
+            height: 40px;
+            background: #999;
+            transform: translateX(-50%);
+        }
+
+        .tree-stats {
+            background: #e8f4f8;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .tree-stat-item {
+            text-align: center;
+        }
+
+        .tree-stat-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #007bff;
+        }
+
+        .tree-stat-label {
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            margin: 20px 0;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .legend-color {
+            width: 40px;
+            height: 25px;
+            border-radius: 4px;
+            border: 2px solid;
+        }
+
+        .legend-color.layer-1 {
+            background: linear-gradient(135deg, #E8F5E9 0%, #C8E6C9 100%);
+            border-color: #4CAF50;
+        }
+
+        .legend-color.layer-2 {
+            background: linear-gradient(135deg, #E3F2FD 0%, #BBDEFB 100%);
+            border-color: #2196F3;
+        }
+
+        .legend-color.layer-3 {
+            background: linear-gradient(135deg, #FFF3E0 0%, #FFE0B2 100%);
+            border-color: #FF9800;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔗 Blockchain Attendance Management System</h1>
+            <p>Multi-Layered Hierarchical Blockchain | Department → Class → Student</p>
+        </header>
+
+        <div class="tabs">
+            <button class="tab active" onclick="showTab('dashboard')">📊 Dashboard</button>
+            <button class="tab" onclick="showTab('departments')">🏢 Departments</button>
+            <button class="tab" onclick="showTab('classes')">📚 Classes</button>
+            <button class="tab" onclick="showTab('students')">👥 Students</button>
+            <button class="tab" onclick="showTab('attendance')">✅ Attendance</button>
+            <button class="tab" onclick="showTab('blockchain')">⛓️ Blockchain</button>
+            <button class="tab" onclick="showTab('validation')">🔍 Validation</button>
+        </div>
+
+        <!-- Dashboard Tab -->
+        <div id="dashboard" class="tab-content active">
+            <h2>System Dashboard</h2>
+            <div class="message" id="dashboard-message"></div>
+            
+            <div class="stats-grid" id="stats-grid">
+                <div class="stat-card">
+                    <h3 id="stat-departments">0</h3>
+                    <p>Departments</p>
+                </div>
+                <div class="stat-card">
+                    <h3 id="stat-classes">0</h3>
+                    <p>Classes</p>
+                </div>
+                <div class="stat-card">
+                    <h3 id="stat-students">0</h3>
+                    <p>Students</p>
+                </div>
+                <div class="stat-card">
+                    <h3 id="stat-attendance">0</h3>
+                    <p>Attendance Records</p>
+                </div>
+            </div>
+
+            <div style="margin-top: 30px;">
+                <h3>System Actions</h3>
+                <button class="btn btn-primary" onclick="initializeSystem()">Initialize Sample Data</button>
+                <button class="btn btn-success" onclick="saveData()">Save Data</button>
+                <button class="btn btn-warning" onclick="loadData()">Load Data</button>
+                <button class="btn btn-primary" onclick="loadStats()">Refresh Stats</button>
+            </div>
+        </div>
+
+        <!-- Departments Tab -->
+        <div id="departments" class="tab-content">
+            <h2>Department Management</h2>
+            <div class="message" id="dept-message"></div>
+
+            <div style="margin-bottom: 30px;">
+                <h3>Create Department</h3>
+                <div class="form-group">
+                    <label>Department ID</label>
+                    <input type="text" id="dept-id" placeholder="e.g., DEPT001">
+                </div>
+                <div class="form-group">
+                    <label>Department Name</label>
+                    <input type="text" id="dept-name" placeholder="e.g., School of Computing">
+                </div>
+                <button class="btn btn-primary" onclick="createDepartment()">Create Department</button>
+            </div>
+
+            <div style="margin-bottom: 30px; background: #f0f8ff; padding: 20px; border-radius: 8px;">
+                <h3>Update Department</h3>
+                <div class="form-group">
+                    <label>Select Department</label>
+                    <select id="dept-update-select" onchange="loadDepartmentForUpdate()">
+                        <option value="">-- Select Department --</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>New Department Name</label>
+                    <input type="text" id="dept-update-name" placeholder="Enter new name">
+                </div>
+                <button class="btn btn-success" onclick="updateDepartment()">Update Department</button>
+            </div>
+
+            <div class="search-bar">
+                <input type="text" id="dept-search" placeholder="Search departments..." onkeyup="searchDepartments()">
+            </div>
+
+            <div id="dept-list">
+                <div class="loading">Loading departments...</div>
+            </div>
+        </div>
+
+        <!-- Classes Tab -->
+        <div id="classes" class="tab-content">
+            <h2>Class Management</h2>
+            <div class="message" id="class-message"></div>
+
+            <div style="margin-bottom: 30px;">
+                <h3>Create Class</h3>
+                <div class="form-group">
+                    <label>Class ID</label>
+                    <input type="text" id="class-id" placeholder="e.g., CS-CLASS-1">
+                </div>
+                <div class="form-group">
+                    <label>Class Name</label>
+                    <input type="text" id="class-name" placeholder="e.g., CS Year 1">
+                </div>
+                <div class="form-group">
+                    <label>Department</label>
+                    <select id="class-dept" onchange="loadDepartments()"></select>
+                </div>
+                <button class="btn btn-primary" onclick="createClass()">Create Class</button>
+            </div>
+
+            <div style="margin-bottom: 30px; background: #f0fff0; padding: 20px; border-radius: 8px;">
+                <h3>Update Class</h3>
+                <div class="form-group">
+                    <label>Select Class</label>
+                    <select id="class-update-select" onchange="loadClassForUpdate()">
+                        <option value="">-- Select Class --</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>New Class Name</label>
+                    <input type="text" id="class-update-name" placeholder="Enter new name">
+                </div>
+                <button class="btn btn-success" onclick="updateClass()">Update Class</button>
+            </div>
+
+            <div class="search-bar">
+                <input type="text" id="class-search" placeholder="Search classes..." onkeyup="searchClasses()">
+            </div>
+
+            <div id="class-list">
+                <div class="loading">Loading classes...</div>
+            </div>
+        </div>
+
+        <!-- Students Tab -->
+        <div id="students" class="tab-content">
+            <h2>Student Management</h2>
+            <div class="message" id="student-message"></div>
+
+            <div style="margin-bottom: 30px;">
+                <h3>Create Student</h3>
+                <div class="form-group">
+                    <label>Student ID</label>
+                    <input type="text" id="student-id" placeholder="e.g., STUDENT-001">
+                </div>
+                <div class="form-group">
+                    <label>Student Name</label>
+                    <input type="text" id="student-name" placeholder="e.g., John Doe">
+                </div>
+                <div class="form-group">
+                    <label>Roll Number</label>
+                    <input type="text" id="student-roll" placeholder="e.g., CS-001">
+                </div>
+                <div class="form-group">
+                    <label>Department</label>
+                    <select id="student-dept" onchange="loadClassesForDept()"></select>
+                </div>
+                <div class="form-group">
+                    <label>Class</label>
+                    <select id="student-class"></select>
+                </div>
+                <button class="btn btn-primary" onclick="createStudent()">Create Student</button>
+            </div>
+
+            <div style="margin-bottom: 30px; background: #fff8f0; padding: 20px; border-radius: 8px;">
+                <h3>Update Student</h3>
+                <div class="form-group">
+                    <label>Select Student</label>
+                    <select id="student-update-select" onchange="loadStudentForUpdate()">
+                        <option value="">-- Select Student --</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>New Student Name</label>
+                    <input type="text" id="student-update-name" placeholder="Enter new name">
+                </div>
+                <div class="form-group">
+                    <label>New Roll Number</label>
+                    <input type="text" id="student-update-roll" placeholder="Enter new roll number">
+                </div>
+                <button class="btn btn-success" onclick="updateStudent()">Update Student</button>
+            </div>
+
+            <div class="search-bar">
+                <input type="text" id="student-search" placeholder="Search students..." onkeyup="searchStudents()">
+            </div>
+
+            <div id="student-list">
+                <div class="loading">Loading students...</div>
+            </div>
+        </div>
+
+        <!-- Attendance Tab -->
+        <div id="attendance" class="tab-content">
+            <h2>Attendance Management</h2>
+            <div class="message" id="attendance-message"></div>
+
+            <div style="margin-bottom: 20px;">
+                <h3>Mark Attendance</h3>
+                <div class="form-group">
+                    <label>Select Class</label>
+                    <select id="attendance-class" onchange="loadStudentsForAttendance()"></select>
+                </div>
+                <div class="form-group">
+                    <label>Date</label>
+                    <input type="date" id="attendance-date" value="">
+                </div>
+            </div>
+
+            <div id="attendance-list">
+                <p style="text-align: center; color: #666;">Select a class to mark attendance</p>
+            </div>
+        </div>
+
+        <!-- Blockchain Tab -->
+        <div id="blockchain" class="tab-content">
+            <h2>Blockchain Explorer</h2>
+            <div class="message" id="blockchain-message"></div>
+
+            <div style="margin-bottom: 20px;">
+                <h3>View Blockchain</h3>
+                <div class="form-group">
+                    <label>Select Type</label>
+                    <select id="blockchain-type" onchange="updateEntitySelect()">
+                        <option value="">-- Select Type --</option>
+                        <option value="department">Department</option>
+                        <option value="class">Class</option>
+                        <option value="student">Student</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Select Entity</label>
+                    <select id="blockchain-entity"></select>
+                </div>
+                <button class="btn btn-primary" onclick="viewBlockchain()">View Blockchain</button>
+            </div>
+
+            <div id="blockchain-viewer"></div>
+
+            <hr style="margin: 40px 0; border: none; border-top: 2px solid #ddd;">
+
+            <div style="margin-bottom: 20px;">
+                <h3>🌳 Complete Blockchain Tree Visualization</h3>
+                <p style="color: #666; margin-bottom: 15px;">
+                    View the entire hierarchical blockchain structure: Department → Class → Student
+                </p>
+                <button class="btn btn-success" onclick="visualizeBlockchainTree()">Generate Tree View</button>
+            </div>
+
+            <div id="blockchain-tree"></div>
+        </div>
+
+        <!-- Validation Tab -->
+        <div id="validation" class="tab-content">
+            <h2>Blockchain Validation</h2>
+            <div class="message" id="validation-message"></div>
+
+            <p style="margin-bottom: 20px;">
+                Validate the entire blockchain hierarchy including all department chains, class chains, and student chains.
+                This checks:
+            </p>
+            <ul style="margin-bottom: 20px; margin-left: 20px;">
+                <li>Hash integrity of all blocks</li>
+                <li>Parent-child chain linkage</li>
+                <li>Proof of Work (PoW) validation</li>
+                <li>Chain continuity</li>
+            </ul>
+
+            <button class="btn btn-primary" onclick="validateBlockchain()">Validate All Chains</button>
+
+            <div id="validation-result"></div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
