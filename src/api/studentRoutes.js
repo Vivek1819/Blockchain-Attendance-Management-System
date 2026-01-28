@@ -10,7 +10,7 @@ module.exports = function(blockchainManager) {
         try {
             const userId = req.auth.userId;
             const userRole = userRoles.getUserRole(userId);
-            const { studentId, studentName, rollNumber, classId, departmentId } = req.body;
+            const { studentName, rollNumber, email, departmentId } = req.body;
 
             if (!userRole) {
                 return res.status(403).json({
@@ -27,19 +27,58 @@ module.exports = function(blockchainManager) {
                 });
             }
 
-            if (!studentId || !studentName || !rollNumber || !classId || !departmentId) {
+            if (!studentName || !rollNumber || !email || !departmentId) {
                 return res.status(400).json({
                     success: false,
-                    message: 'Student ID, name, roll number, class ID, and department ID are required'
+                    message: 'Student name, roll number, email, and department ID are required'
                 });
             }
 
-            const result = blockchainManager.createStudent(studentId, studentName, rollNumber, classId, departmentId, req.body);
+            // Auto-generate Student ID
+            const studentId = `ST-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`;
+
+            const result = blockchainManager.createStudent(studentId, studentName, rollNumber, email, departmentId, req.body);
             blockchainManager.saveToFile();
             
             res.status(201).json({
                 success: true,
                 message: 'Student created successfully',
+                data: result
+            });
+        } catch (error) {
+            res.status(400).json({
+                success: false,
+                message: error.message
+            });
+        }
+    });
+
+    // Enroll student in class - Teacher can only enroll in their department's classes
+    router.post('/enroll', requireAuth, (req, res) => {
+        try {
+            const userId = req.auth.userId;
+            const userRole = userRoles.getUserRole(userId);
+            const { studentId, classId } = req.body;
+
+            if (!studentId || !classId) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Student ID and Class ID are required'
+                });
+            }
+            
+            // Note: Verification of Dept access is handled inside blockchainManager usually, 
+            // but we can add extra check if needed. Manager checks if class matches student dept.
+            // Admin can do all. Teacher limited?
+            // Teacher should only enroll in classes they manage? 
+            // Currently Teacher manages Dept. So if Class is in Dept, it's fine.
+            
+            const result = blockchainManager.enrollStudentInClass(studentId, classId);
+            blockchainManager.saveToFile();
+
+            res.json({
+                success: true,
+                message: 'Student enrolled successfully',
                 data: result
             });
         } catch (error) {

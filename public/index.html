@@ -844,10 +844,6 @@
             <div style="margin-bottom: 30px;">
                 <h3>Create Student</h3>
                 <div class="form-group">
-                    <label>Student ID</label>
-                    <input type="text" id="student-id" placeholder="e.g., STUDENT-001">
-                </div>
-                <div class="form-group">
                     <label>Student Name</label>
                     <input type="text" id="student-name" placeholder="e.g., John Doe">
                 </div>
@@ -856,13 +852,14 @@
                     <input type="text" id="student-roll" placeholder="e.g., CS-001">
                 </div>
                 <div class="form-group">
-                    <label>Department</label>
-                    <select id="student-dept" onchange="loadClassesForDept()"></select>
+                    <label>Email</label>
+                    <input type="email" id="student-email" placeholder="e.g., john@example.com">
                 </div>
                 <div class="form-group">
-                    <label>Class</label>
-                    <select id="student-class"></select>
+                    <label>Department</label>
+                    <select id="student-dept" onchange="/* Class loading no longer needed here */"></select>
                 </div>
+                <!-- Class selection removed for initial registration -->
                 <button class="btn btn-primary" onclick="createStudent()">Create Student</button>
             </div>
 
@@ -974,6 +971,30 @@
             <button class="btn btn-primary" onclick="validateBlockchain()">Validate All Chains</button>
 
             <div id="validation-result"></div>
+        </div>
+    </div>
+
+    <!-- Assign Class Modal -->
+    <div id="assign-class-modal"
+        style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center;">
+        <div style="background: white; padding: 25px; border-radius: 10px; width: 400px; max-width: 90%;">
+            <h3 style="margin-top: 0;">Enroll in Class</h3>
+            <p id="assign-student-name-display" style="margin-bottom: 20px; color: #666;"></p>
+            <input type="hidden" id="assign-student-id">
+
+            <div class="form-group">
+                <label>Select Class</label>
+                <select id="assign-class-select"
+                    style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
+                    <option value="">Loading...</option>
+                </select>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px;">
+                <button class="btn" style="background: #e2e8f0; color: #333;"
+                    onclick="document.getElementById('assign-class-modal').style.display='none'">Cancel</button>
+                <button class="btn btn-primary" onclick="confirmAssignClass()">Enroll Student</button>
+            </div>
         </div>
     </div>
 

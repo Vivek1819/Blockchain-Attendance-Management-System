@@ -12,7 +12,7 @@ module.exports = (blockchainManager) => {
             const validation = blockchainManager.validateAllChains();
             res.json({
                 success: true,
-                validation
+                data: validation
             });
         } catch (error) {
             res.status(500).json({
@@ -28,7 +28,7 @@ module.exports = (blockchainManager) => {
             const stats = blockchainManager.getSystemStats();
             res.json({
                 success: true,
-                stats
+                data: stats
             });
         } catch (error) {
             res.status(500).json({

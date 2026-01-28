@@ -70,6 +70,26 @@ module.exports = function(blockchainManager) {
         }
     });
 
+    // Get all classes - Public
+    router.get('/', (req, res) => {
+        try {
+            const classes = blockchainManager.getAllClasses();
+            res.json({
+                success: true,
+                data: classes.map(cls => ({
+                    ...cls,
+                    id: cls.classId,
+                    name: cls.className
+                }))
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    });
+
     // Get class by ID - Public
     router.get('/:classId', (req, res) => {
         try {

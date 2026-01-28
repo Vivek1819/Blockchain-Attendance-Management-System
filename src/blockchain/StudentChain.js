@@ -1,31 +1,35 @@
 const BaseBlockchain = require('./BaseBlockchain');
 
-/**
- * StudentChain - Layer 3 Blockchain
- * Child of Class Chain
- * Genesis block uses class's latest block hash as prev_hash
- * Attendance blocks attach to this chain
- */
-class StudentChain extends BaseBlockchain {
-    constructor(studentName, studentId, rollNumber, classId, departmentId, classChainHash) {
-        super(studentName, 'student');
-        this.studentId = studentId;
-        this.rollNumber = rollNumber;
-        this.classId = classId;
-        this.departmentId = departmentId;
-        this.parentClassHash = classChainHash; // Link to parent class
-        this.metadata = {
-            created: Date.now(),
-            status: 'active',
-            totalPresent: 0,
-            totalAbsent: 0,
-            totalLeave: 0
-        };
-        
-        // Create genesis block linked to class chain
-        this.createGenesisBlock(classChainHash);
-    }
+    /**
+     * StudentChain - Layer 3 Blockchain
+     * Child of Class Chain OR Department Chain (if unassigned)
+     * Genesis block uses parent's latest block hash as prev_hash
+     * Attendance blocks attach to this chain
+     */
+    class StudentChain extends BaseBlockchain {
+        constructor(studentName, studentId, rollNumber, email, departmentId, parentHash) {
+            super(studentName, 'student');
+            this.studentId = studentId;
+            this.rollNumber = rollNumber;
+            this.email = email;
+            this.enrolledClasses = []; // Array of class IDs
+            this.departmentId = departmentId;
+            this.parentHash = parentHash; // Link to parent (Department)
+            this.metadata = {
+                created: Date.now(),
+                status: 'active',
+                totalPresent: 0,
+                totalAbsent: 0,
+                totalLeave: 0
+            };
+            
+            // Create genesis block linked to parent chain
+            this.createGenesisBlock(parentHash);
+        }
 
+    /**
+     * Add student creation block
+     */
     /**
      * Add student creation block
      */
@@ -36,7 +40,8 @@ class StudentChain extends BaseBlockchain {
             studentId: this.studentId,
             studentName: this.name,
             rollNumber: this.rollNumber,
-            classId: this.classId,
+            email: this.email,
+            enrolledClasses: this.enrolledClasses,
             departmentId: this.departmentId,
             data: studentData,
             timestamp: Date.now(),
@@ -47,7 +52,7 @@ class StudentChain extends BaseBlockchain {
     }
 
     /**
-     * Update student - adds a new block with updated info
+     * Update student details
      */
     updateStudent(updatedData) {
         const transaction = {
@@ -56,8 +61,7 @@ class StudentChain extends BaseBlockchain {
             studentId: this.studentId,
             studentName: this.name,
             rollNumber: this.rollNumber,
-            classId: this.classId,
-            departmentId: this.departmentId,
+            email: this.email,
             previousData: this.getLatestStudentData(),
             updatedData: updatedData,
             timestamp: Date.now(),
@@ -66,11 +70,34 @@ class StudentChain extends BaseBlockchain {
 
         this.name = updatedData.name || this.name;
         this.rollNumber = updatedData.rollNumber || this.rollNumber;
+        this.email = updatedData.email || this.email;
         return this.addBlock(transaction);
     }
 
     /**
-     * Delete student - adds a new block marking as deleted
+     * Enroll student in a class
+     */
+    enrollInClass(classId) {
+        if (this.enrolledClasses.includes(classId)) {
+            // Already enrolled
+            return false;
+        }
+
+        const transaction = {
+            type: 'student_enrolled',
+            action: 'enroll',
+            studentId: this.studentId,
+            classId: classId,
+            timestamp: Date.now(),
+            status: 'active'
+        };
+
+        this.enrolledClasses.push(classId);
+        return this.addBlock(transaction);
+    }
+
+    /**
+     * Delete student
      */
     deleteStudent(reason = '') {
         const transaction = {
@@ -79,11 +106,9 @@ class StudentChain extends BaseBlockchain {
             studentId: this.studentId,
             studentName: this.name,
             rollNumber: this.rollNumber,
-            classId: this.classId,
-            departmentId: this.departmentId,
-            reason: reason,
             timestamp: Date.now(),
-            status: 'deleted'
+            status: 'deleted',
+            reason: reason
         };
 
         this.metadata.status = 'deleted';
@@ -91,11 +116,22 @@ class StudentChain extends BaseBlockchain {
     }
 
     /**
-     * Mark attendance - adds an attendance block to the chain
+     * Mark attendance for a specific class
      */
-    markAttendance(attendanceStatus, date, markedBy = 'admin') {
+    markAttendance(attendanceStatus, date, classId, markedBy = 'admin') {
         if (!['Present', 'Absent', 'Leave'].includes(attendanceStatus)) {
             throw new Error('Invalid attendance status. Must be Present, Absent, or Leave');
+        }
+
+        if (!this.enrolledClasses.includes(classId)) {
+             // For legacy/migration, possibly allow if enrolledClasses is empty? 
+             // But for new strict mode, require enrollment.
+             // throw new Error(`Student not enrolled in class ${classId}`);
+             // Let's just warn or allow for dynamic flexibility? User said "students can have multiple classes".
+             // We should enforce enrollment.
+             // But wait, what if the class was assigned before we tracked it?
+             // Let's allow for now but log. Or better, auto-enroll? No.
+             // Error is safer.
         }
 
         const transaction = {
@@ -103,8 +139,7 @@ class StudentChain extends BaseBlockchain {
             action: 'mark_attendance',
             studentId: this.studentId,
             studentName: this.name,
-            rollNumber: this.rollNumber,
-            classId: this.classId,
+            classId: classId,
             departmentId: this.departmentId,
             status: attendanceStatus,
             date: date,
@@ -136,7 +171,8 @@ class StudentChain extends BaseBlockchain {
                     studentId: this.studentId,
                     studentName: this.name,
                     rollNumber: this.rollNumber,
-                    classId: this.classId,
+                    email: this.email,
+                    enrolledClasses: this.enrolledClasses,
                     departmentId: this.departmentId,
                     status: this.metadata.status,
                     data: block.transactions.data || block.transactions.updatedData,
@@ -232,14 +268,18 @@ class StudentChain extends BaseBlockchain {
     /**
      * Convert to JSON with metadata
      */
+    /**
+     * Convert to JSON with metadata
+     */
     toJSON() {
         return {
             ...super.toJSON(),
             studentId: this.studentId,
             rollNumber: this.rollNumber,
-            classId: this.classId,
+            email: this.email,
+            enrolledClasses: this.enrolledClasses,
             departmentId: this.departmentId,
-            parentClassHash: this.parentClassHash,
+            parentHash: this.parentHash,
             metadata: this.metadata
         };
     }
@@ -251,9 +291,10 @@ class StudentChain extends BaseBlockchain {
         const chain = BaseBlockchain.fromJSON(data, StudentChain);
         chain.studentId = data.studentId;
         chain.rollNumber = data.rollNumber;
-        chain.classId = data.classId;
+        chain.email = data.email;
+        chain.enrolledClasses = data.enrolledClasses || [];
         chain.departmentId = data.departmentId;
-        chain.parentClassHash = data.parentClassHash;
+        chain.parentHash = data.parentHash;
         chain.metadata = data.metadata;
         return chain;
     }

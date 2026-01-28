@@ -193,6 +193,17 @@ class BlockchainManager {
     }
 
     /**
+     * Get all classes
+     */
+    getAllClasses() {
+        const classes = [];
+        for (const [id, chain] of this.classes) {
+            classes.push(chain.getLatestClassData());
+        }
+        return classes;
+    }
+
+    /**
      * Update class
      */
     updateClass(classId, updatedData) {
@@ -253,23 +264,23 @@ class BlockchainManager {
     /**
      * Create a new student under a class
      */
-    createStudent(studentId, studentName, rollNumber, classId, departmentId, additionalData = {}) {
+    /**
+     * Create a new student under a department
+     */
+    createStudent(studentId, studentName, rollNumber, email, departmentId, additionalData = {}) {
         if (this.students.has(studentId)) {
             throw new Error(`Student with ID ${studentId} already exists`);
         }
 
-        const cls = this.classes.get(classId);
-        if (!cls) {
-            throw new Error(`Class ${classId} not found`);
+        const dept = this.departments.get(departmentId);
+        if (!dept) {
+            throw new Error(`Department ${departmentId} not found`);
         }
+        
+        const parentHash = dept.getLatestBlock().hash;
 
-        if (!cls.isActive()) {
-            throw new Error(`Cannot create student under inactive class`);
-        }
-
-        // Get class's latest hash for linking
-        const classHash = cls.getLatestBlock().hash;
-        const studentChain = new StudentChain(studentName, studentId, rollNumber, classId, departmentId, classHash);
+        // Create student chain linked to Department
+        const studentChain = new StudentChain(studentName, studentId, rollNumber, email, departmentId, parentHash);
         studentChain.addStudentBlock(additionalData);
         this.students.set(studentId, studentChain);
 
@@ -278,10 +289,44 @@ class BlockchainManager {
             studentId: studentId,
             studentName: studentName,
             rollNumber: rollNumber,
-            classId: classId,
+            email: email,
             departmentId: departmentId,
-            linkedToClassHash: classHash,
+            linkedToHash: parentHash,
+            linkedToType: 'department',
             latestHash: studentChain.getLatestBlock().hash
+        };
+    }
+
+    /**
+     * Enroll student in a class
+     */
+    enrollStudentInClass(studentId, classId) {
+        const student = this.students.get(studentId);
+        if (!student) {
+            throw new Error(`Student ${studentId} not found`);
+        }
+
+        const cls = this.classes.get(classId);
+        if (!cls) {
+            throw new Error(`Class ${classId} not found`);
+        }
+        if (!cls.isActive()) {
+            throw new Error(`Cannot enroll in inactive class`);
+        }
+        if (cls.departmentId !== student.departmentId) {
+            throw new Error(`Class must be in the same department (${student.departmentId})`);
+        }
+
+        const result = student.enrollInClass(classId);
+        if (!result) {
+            throw new Error('Student is already enrolled in this class');
+        }
+
+        return {
+            success: true,
+            studentId: studentId,
+            classId: classId,
+            message: 'Student enrolled successfully'
         };
     }
 
@@ -342,6 +387,20 @@ class BlockchainManager {
             throw new Error(`Student ${studentId} not found`);
         }
 
+        // Validate Class if being updated
+        if (updatedData.classId) {
+            const cls = this.classes.get(updatedData.classId);
+            if (!cls) {
+                throw new Error(`Class ${updatedData.classId} not found`);
+            }
+            if (!cls.isActive()) {
+                throw new Error(`Cannot assign student to inactive class`);
+            }
+            if (cls.departmentId !== student.departmentId) {
+                throw new Error(`Class must be in the same department (${student.departmentId})`);
+            }
+        }
+
         student.updateStudent(updatedData);
         return {
             success: true,
@@ -387,20 +446,33 @@ class BlockchainManager {
     /**
      * Mark attendance for a student
      */
-    markAttendance(studentId, status, date, markedBy = 'admin') {
+    /**
+     * Mark attendance for a student
+     */
+    markAttendance(studentId, classId, status, date, markedBy = 'admin') {
         const student = this.students.get(studentId);
         if (!student) {
             throw new Error(`Student ${studentId} not found`);
+        }
+
+        if (!classId) {
+            throw new Error(`Class ID is required to mark attendance`);
+        }
+
+        // Validate Class existence
+        if (!this.classes.has(classId)) {
+            throw new Error(`Class ${classId} not found`);
         }
 
         if (!student.isActive()) {
             throw new Error(`Cannot mark attendance for inactive student`);
         }
 
-        student.markAttendance(status, date, markedBy);
+        student.markAttendance(status, date, classId, markedBy);
         return {
             success: true,
             studentId: studentId,
+            classId: classId,
             status: status,
             date: date,
             message: 'Attendance marked successfully'
@@ -505,6 +577,31 @@ class BlockchainManager {
         return student.toJSON();
     }
 
+    // ==================== SYSTEM STATS ====================
+
+    /**
+     * Get system statistics
+     */
+    getSystemStats() {
+        let totalAttendanceRecords = 0;
+        
+        for (const [id, chain] of this.students) {
+            const meta = chain.metadata;
+            // Ensure properties exist (default to 0)
+            const present = meta.totalPresent || 0;
+            const absent = meta.totalAbsent || 0;
+            const leave = meta.totalLeave || 0;
+            totalAttendanceRecords += (present + absent + leave);
+        }
+
+        return {
+            totalDepartments: this.departments.size,
+            totalClasses: this.classes.size,
+            totalStudents: this.students.size,
+            totalAttendanceRecords
+        };
+    }
+
     // ==================== VALIDATION OPERATIONS ====================
 
     /**
@@ -558,10 +655,10 @@ class BlockchainManager {
             }
 
             // Verify parent link - check against the stored parent hash
-            const parentValid = studentChain.verifyParentLink(studentChain.parentClassHash);
+            const parentValid = studentChain.verifyParentLink(studentChain.parentHash);
             if (!parentValid) {
                 validation.isValid = false;
-                validation.errors.push(`Student ${studentId} has invalid parent link to class ${studentChain.classId}`);
+                validation.errors.push(`Student ${studentId} has invalid parent link to department ${studentChain.departmentId}`);
             }
         }
 

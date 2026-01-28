@@ -271,15 +271,31 @@ function updateProtectedTabs(isAuthenticated, userInfo) {
                 // Hide departments tab completely for teachers
                 if (tabId === 'departments' && userInfo && userInfo.role === 'teacher') {
                     tab.style.display = 'none';
-                } else if (tabId === 'departments') {
+                } 
+                // Hide attendance tab completely for admins
+                else if (tabId === 'attendance' && userInfo && userInfo.role === 'admin') {
+                    tab.style.display = 'none';
+                }
+                else {
                     tab.style.display = 'block'; // Ensure it's shown for others
                     
-                    // Only admin can see create form
+                    // Only admin can see create forms in ANY tab
                     if (userInfo && userInfo.role !== 'admin') {
-                        const createForm = content.querySelector('div[style*="margin-bottom: 30px"]');
-                        if (createForm && createForm.querySelector('h3')?.textContent === 'Create Department') {
-                            createForm.style.display = 'none';
-                        }
+                        // Look for "Create" forms using header text
+                        const headers = content.querySelectorAll('h3');
+                        headers.forEach(h3 => {
+                            if (h3.textContent.includes('Create')) {
+                                // Hide the parent container
+                                h3.parentElement.style.display = 'none';
+                            }
+                        });
+                        
+                        // Hide Update forms for non-admins too
+                        headers.forEach(h3 => {
+                            if (h3.textContent.includes('Update')) {
+                                h3.parentElement.style.display = 'none';
+                            }
+                        });
                     }
                 }
             }
@@ -878,27 +894,44 @@ async function loadStudentsList() {
     listEl.innerHTML = '<div class="loading">Loading students...</div>';
     
     try {
-        let url = '/api/students';
-        if (currentUserDetails && currentUserDetails.role === 'teacher') {
-            url = `/api/students/department/${currentUserDetails.departmentId}`;
+        // User requested: "teacher and admin will see the list of all students"
+        // So we fetch global list for everyone.
+        // Also fetch classes to map IDs to Names
+        const [studentsRes, classesRes] = await Promise.all([
+            fetch('/api/students'),
+            fetch('/api/classes')
+        ]);
+        
+        const data = await studentsRes.json();
+        const classesData = await classesRes.json();
+        
+        const classMap = {};
+        if (classesData.success && classesData.data) {
+            classesData.data.forEach(c => classMap[c.id] = c.name);
         }
         
-        const response = await fetch(url);
-        const data = await response.json();
-        
         if (data.success && data.data.length > 0) {
+            // Update global variable for other functions to use
+            allStudents = data.data;
+            
             let html = '<table><thead><tr><th>ID</th><th>Name</th><th>Roll No</th><th>Class</th><th>Department</th><th>Actions</th></tr></thead><tbody>';
             
             data.data.forEach(student => {
+                const isUnassigned = !student.enrolledClasses || student.enrolledClasses.length === 0;
+                let classDisplay = isUnassigned 
+                    ? '<span style="color:#d69e2e; font-weight:bold;">⚠️ Unassigned</span>' 
+                    : student.enrolledClasses.map(c => `<span style="background:#e3f2fd; color:#0d47a1; padding:2px 6px; border-radius:4px; margin-right:4px; display:inline-block; font-size:0.85em; margin-bottom: 2px;">${classMap[c] || c}</span>`).join('');
+                
                 html += `
                     <tr>
                         <td>${student.id}</td>
                         <td>${student.name}</td>
                         <td>${student.rollNumber}</td>
-                        <td>${student.classId}</td>
+                        <td>${classDisplay}</td>
                         <td>${student.departmentId}</td>
                         <td>
                             <button class="btn btn-primary" onclick="viewStudentBlockchain('${student.id}')" style="padding: 5px 10px; font-size: 0.85em;">View Chain</button>
+                            <button class="btn btn-warning" onclick="openAssignClassModal('${student.id}', '${student.departmentId}')" style="padding: 5px 10px; font-size: 0.85em; margin-left: 5px;">Assign Class</button>
                         </td>
                     </tr>
                 `;
@@ -915,13 +948,13 @@ async function loadStudentsList() {
 }
 
 async function createStudent() {
-    const id = document.getElementById('student-id').value.trim();
+    // ID is auto-generated by backend now
     const name = document.getElementById('student-name').value.trim();
     const roll = document.getElementById('student-roll').value.trim();
+    const email = document.getElementById('student-email').value.trim();
     const deptId = document.getElementById('student-dept').value;
-    const classId = document.getElementById('student-class').value;
     
-    if (!id || !name || !roll || !deptId || !classId) {
+    if (!name || !roll || !email || !deptId) {
         showMessage('student-message', 'Please fill in all fields', 'error');
         return;
     }
@@ -931,11 +964,10 @@ async function createStudent() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
-                studentId: id, 
                 studentName: name, 
                 rollNumber: roll,
-                departmentId: deptId,
-                classId: classId
+                email: email,
+                departmentId: deptId
             })
         });
         
@@ -1080,13 +1112,16 @@ async function loadStudentsForAttendance() {
                             <h4>${student.name}</h4>
                             <p>Roll: ${student.rollNumber} | ID: ${student.id}</p>
                         </div>
-                        ${isMarked ? statusBadge : `
-                        <div class="attendance-buttons">
-                            <button class="btn-present" onclick="markAttendance('${student.id}', 'Present')">Present</button>
-                            <button class="btn-absent" onclick="markAttendance('${student.id}', 'Absent')">Absent</button>
-                            <button class="btn-leave" onclick="markAttendance('${student.id}', 'Leave')">Leave</button>
-                        </div>
-                        `}
+                        ${isMarked ? statusBadge : (
+                            currentUserDetails && currentUserDetails.role === 'admin' 
+                            ? `<div style="color: #718096; font-style: italic; background: #edf2f7; padding: 5px 10px; border-radius: 4px;">View Only (Admin)</div>` 
+                            : `
+                            <div class="attendance-buttons">
+                                <button class="btn-present" onclick="markAttendance('${student.id}', 'Present')">Present</button>
+                                <button class="btn-absent" onclick="markAttendance('${student.id}', 'Absent')">Absent</button>
+                                <button class="btn-leave" onclick="markAttendance('${student.id}', 'Leave')">Leave</button>
+                            </div>`
+                        )}
                     </div>
                 `;
             });
@@ -1103,13 +1138,19 @@ async function loadStudentsForAttendance() {
 }
 
 async function markAttendance(studentId, status) {
+    const classId = document.getElementById('attendance-class').value;
     const date = document.getElementById('attendance-date').value || new Date().toISOString().split('T')[0];
+    
+    if (!classId) {
+        showMessage('message', 'Please select a class to mark attendance', 'error');
+        return;
+    }
     
     try {
         const response = await authenticatedFetch('/api/attendance/mark', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ studentId, status, date })
+            body: JSON.stringify({ studentId, classId, status, date })
         });
         
         const data = await response.json();
@@ -1360,9 +1401,9 @@ async function validateBlockchain() {
         const data = await response.json();
         
         if (data.success) {
-            const isValid = data.validation.isValid;
-            const errorMsg = data.validation.errors && data.validation.errors.length > 0 
-                ? data.validation.errors.join('<br>') 
+            const isValid = data.data.isValid;
+            const errorMsg = data.data.errors && data.data.errors.length > 0 
+                ? data.data.errors.join('<br>') 
                 : 'Validation failed.';
                 
             resultEl.innerHTML = `
@@ -1505,5 +1546,74 @@ async function visualizeBlockchainTree() {
     } catch (error) {
         console.error('Tree generation error:', error);
         container.innerHTML = '<p style="color: red; text-align: center;">Error generating tree view. Please try reloading data.</p>';
+    }
+}
+
+// =============================================
+// STUDENT ASSIGNMENT MODAL
+// =============================================
+
+async function openAssignClassModal(studentId, departmentId) {
+    const modal = document.getElementById('assign-class-modal');
+    const select = document.getElementById('assign-class-select');
+    const student = allStudents.find(s => s.id === studentId);
+    
+    document.getElementById('assign-student-id').value = studentId;
+    document.getElementById('assign-student-name-display').textContent = `Enrolling class for: ${student ? student.name : studentId}`;
+    
+    select.innerHTML = '<option value="">Loading classes...</option>';
+    modal.style.display = 'flex';
+    
+    try {
+        const response = await fetch(`/api/classes/department/${departmentId}`);
+        const data = await response.json();
+        
+        if (data.success && data.data.length > 0) {
+            select.innerHTML = '<option value="">-- Select Class --</option>';
+            data.data.forEach(cls => {
+                const isEnrolled = student && student.enrolledClasses && student.enrolledClasses.includes(cls.id);
+                select.innerHTML += `<option value="${cls.id}" ${isEnrolled ? 'disabled' : ''}>${cls.name} ${isEnrolled ? '(Enrolled)' : ''}</option>`;
+            });
+        } else {
+            select.innerHTML = '<option value="">No classes found in this department</option>';
+        }
+    } catch (error) {
+        console.error('Error loading classes:', error);
+        select.innerHTML = '<option value="">Error loading classes</option>';
+    }
+}
+
+async function confirmAssignClass() {
+    const studentId = document.getElementById('assign-student-id').value;
+    const classId = document.getElementById('assign-class-select').value;
+    
+    if (!classId) {
+        alert('Please select a class');
+        return;
+    }
+    
+    try {
+        const response = await authenticatedFetch(`/api/students/enroll`, {
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ studentId: studentId, classId: classId })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            document.getElementById('assign-class-modal').style.display = 'none';
+            showMessage('student-message', 'Student enrolled successfully!', 'success');
+            
+            // Refresh lists
+            loadStudentsList();
+            // Also refresh student stats if needed
+            loadStats(); 
+        } else {
+            alert(data.message || 'Failed to enroll student');
+        }
+    } catch (error) {
+        console.error('Error enrolling student:', error);
+        alert('Error enrolling student');
     }
 }
