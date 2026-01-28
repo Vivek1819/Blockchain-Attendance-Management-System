@@ -1023,6 +1023,8 @@ async function viewStudentBlockchain(studentId) {
 
 async function loadStudentsForAttendance() {
     const classId = document.getElementById('attendance-class').value;
+    const dateInput = document.getElementById('attendance-date');
+    const date = dateInput ? dateInput.value : new Date().toISOString().split('T')[0];
     const listEl = document.getElementById('attendance-list');
     
     if (!classId) {
@@ -1030,27 +1032,61 @@ async function loadStudentsForAttendance() {
         return;
     }
     
-    listEl.innerHTML = '<div class="loading">Loading students...</div>';
+    listEl.innerHTML = '<div class="loading">Loading students and checking blockchain...</div>';
     
     try {
-        const response = await fetch(`/api/students/class/${classId}`);
-        const data = await response.json();
+        // Parallel fetch: Students in class AND Existing attendance for the date
+        const [studentsRes, attendanceRes] = await Promise.all([
+            fetch(`/api/students/class/${classId}`),
+            fetch(`/api/attendance/class/${classId}/date/${date}`)
+        ]);
+
+        const studentsData = await studentsRes.json();
+        const attendanceData = await attendanceRes.json();
         
-        if (data.success && data.data.length > 0) {
+        // Create map of existing attendance: studentId -> status
+        const attendanceMap = {};
+        if (attendanceData.success && attendanceData.data) {
+            attendanceData.data.forEach(record => {
+                attendanceMap[record.studentId] = record.status;
+            });
+        }
+        
+        if (studentsData.success && studentsData.data.length > 0) {
             let html = '<div class="attendance-grid">';
             
-            data.data.forEach(student => {
+            studentsData.data.forEach(student => {
+                const existingStatus = attendanceMap[student.id];
+                // Only consider it marked if status exists and is not "Not Marked"
+                const isMarked = !!existingStatus && existingStatus !== 'Not Marked';
+                
+                // Status badge HTML with new CSS classes
+                let statusBadge = '';
+                if (isMarked) {
+                    let icon = '🔒';
+                    if (existingStatus === 'Present') icon = '✅';
+                    else if (existingStatus === 'Absent') icon = '❌';
+                    else if (existingStatus === 'Leave') icon = '📝';
+                    
+                    statusBadge = `<div class="status-badge ${existingStatus}">
+                        <span>${icon}</span>
+                        <span>${existingStatus}</span>
+                    </div>`;
+                }
+
                 html += `
-                    <div class="student-attendance" id="attendance-${student.id}">
+                    <div class="student-attendance ${isMarked ? 'marked' : ''}" id="attendance-${student.id}">
                         <div class="student-info">
                             <h4>${student.name}</h4>
                             <p>Roll: ${student.rollNumber} | ID: ${student.id}</p>
                         </div>
+                        ${isMarked ? statusBadge : `
                         <div class="attendance-buttons">
                             <button class="btn-present" onclick="markAttendance('${student.id}', 'Present')">Present</button>
                             <button class="btn-absent" onclick="markAttendance('${student.id}', 'Absent')">Absent</button>
                             <button class="btn-leave" onclick="markAttendance('${student.id}', 'Leave')">Leave</button>
                         </div>
+                        `}
                     </div>
                 `;
             });
@@ -1061,7 +1097,8 @@ async function loadStudentsForAttendance() {
             listEl.innerHTML = '<p style="text-align: center; color: #666;">No students found in this class</p>';
         }
     } catch (error) {
-        listEl.innerHTML = '<p style="color: red;">Error loading students</p>';
+        console.error(error);
+        listEl.innerHTML = '<p style="color: red;">Error loading data</p>';
     }
 }
 
@@ -1080,8 +1117,24 @@ async function markAttendance(studentId, status) {
         if (data.success) {
             const studentEl = document.getElementById(`attendance-${studentId}`);
             if (studentEl) {
-                studentEl.style.background = status === 'Present' ? '#d4edda' : 
-                                             status === 'Absent' ? '#f8d7da' : '#fff3cd';
+                // Remove buttons
+                const buttons = studentEl.querySelector('.attendance-buttons');
+                if (buttons) buttons.remove();
+                
+                // Add marked class
+                studentEl.classList.add('marked');
+                
+                // Add status badge
+                let icon = '🔒';
+                if (status === 'Present') icon = '✅';
+                else if (status === 'Absent') icon = '❌';
+                else if (status === 'Leave') icon = '📝';
+                
+                const badge = document.createElement('div');
+                badge.className = `status-badge ${status}`;
+                badge.innerHTML = `<span>${icon}</span><span>${status}</span>`;
+                
+                studentEl.appendChild(badge);
             }
             showMessage('attendance-message', `Marked ${status} for student (by ${data.data.markedBy})`, 'success');
         } else {
@@ -1097,6 +1150,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const dateInput = document.getElementById('attendance-date');
     if (dateInput) {
         dateInput.value = new Date().toISOString().split('T')[0];
+        // Reload students/status when date changes
+        dateInput.addEventListener('change', loadStudentsForAttendance);
     }
 });
 

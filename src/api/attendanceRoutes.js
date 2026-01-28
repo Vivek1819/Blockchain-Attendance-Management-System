@@ -47,6 +47,16 @@ module.exports = function(blockchainManager) {
             const markedBy = userRole.name || 'Unknown Teacher';
             const attendanceDate = date || new Date().toISOString().split('T')[0];
 
+            // Check if attendance already exists for this date
+            const { history } = blockchainManager.getStudentAttendance(studentId);
+            const existing = history.find(r => r.date === attendanceDate);
+            if (existing) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Attendance already marked as '${existing.status}' via blockchain. First entry is final.`
+                });
+            }
+
             const result = blockchainManager.markAttendance(studentId, status, attendanceDate, markedBy);
             blockchainManager.saveToFile();
             
@@ -106,6 +116,17 @@ module.exports = function(blockchainManager) {
                         errors.push({ 
                             studentId: record.studentId, 
                             error: 'Not authorized for this student\'s department' 
+                        });
+                        continue;
+                    }
+
+                    // Check for duplicate attendance
+                    const { history } = blockchainManager.getStudentAttendance(record.studentId);
+                    const existing = history.find(r => r.date === attendanceDate);
+                    if (existing) {
+                        errors.push({ 
+                            studentId: record.studentId, 
+                            error: `Already marked as ${existing.status}` 
                         });
                         continue;
                     }
