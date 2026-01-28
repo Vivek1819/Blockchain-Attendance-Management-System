@@ -472,6 +472,39 @@ class BlockchainManager {
         return attendance;
     }
 
+    /**
+     * Get department blockchain (full chain)
+     */
+    getDepartmentBlockchain(departmentId) {
+        const dept = this.departments.get(departmentId);
+        if (!dept) {
+            throw new Error(`Department ${departmentId} not found`);
+        }
+        return dept.toJSON();
+    }
+
+    /**
+     * Get class blockchain (full chain)
+     */
+    getClassBlockchain(classId) {
+        const cls = this.classes.get(classId);
+        if (!cls) {
+            throw new Error(`Class ${classId} not found`);
+        }
+        return cls.toJSON();
+    }
+
+    /**
+     * Get student blockchain (full chain)
+     */
+    getStudentBlockchain(studentId) {
+        const student = this.students.get(studentId);
+        if (!student) {
+            throw new Error(`Student ${studentId} not found`);
+        }
+        return student.toJSON();
+    }
+
     // ==================== VALIDATION OPERATIONS ====================
 
     /**

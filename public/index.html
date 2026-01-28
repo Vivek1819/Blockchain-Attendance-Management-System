@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -23,7 +24,7 @@
             margin: 0 auto;
             background: white;
             border-radius: 15px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
             overflow: hidden;
         }
 
@@ -391,7 +392,7 @@
             padding: 15px 25px;
             background: white;
             border-radius: 8px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
             text-align: center;
             min-width: 180px;
             position: relative;
@@ -431,7 +432,7 @@
             color: #888;
             margin-top: 8px;
             padding-top: 8px;
-            border-top: 1px solid rgba(0,0,0,0.1);
+            border-top: 1px solid rgba(0, 0, 0, 0.1);
         }
 
         .tree-line-v {
@@ -547,13 +548,57 @@
             border-color: #FF9800;
         }
     </style>
+    <!-- Clerk Authentication -->
+    <script async crossorigin="anonymous"
+        data-clerk-publishable-key="pk_test_cHJvZm91bmQtbWFuYXRlZS05MC5jbGVyay5hY2NvdW50cy5kZXYk"
+        src="https://cdn.jsdelivr.net/npm/@clerk/clerk-js@latest/dist/clerk.browser.js" type="text/javascript">
+        </script>
 </head>
+
 <body>
     <div class="container">
         <header>
-            <h1>🔗 Blockchain Attendance Management System</h1>
-            <p>Multi-Layered Hierarchical Blockchain | Department → Class → Student</p>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h1>🔗 Blockchain Attendance Management System</h1>
+                    <p>Multi-Layered Hierarchical Blockchain | Department → Class → Student</p>
+                </div>
+                <div id="auth-container">
+                    <!-- Auth buttons will be inserted here by JavaScript -->
+                    <div id="auth-loading" style="color: white; font-size: 0.9em;">Loading...</div>
+                </div>
+            </div>
         </header>
+        <!-- Onboarding Modal -->
+        <div id="onboarding-modal"
+            style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center;">
+            <div
+                style="background: white; padding: 40px; border-radius: 15px; max-width: 500px; width: 90%; text-align: center;">
+                <h2 style="color: #667eea; margin-bottom: 20px;">👋 Welcome! Complete Your Setup</h2>
+                <p style="margin-bottom: 30px; color: #666;">Please enter your name and select your department to get
+                    started.</p>
+
+                <div class="form-group">
+                    <label style="text-align: left;">Your Name</label>
+                    <input type="text" id="onboard-name" placeholder="Enter your full name">
+                </div>
+
+                <div class="form-group">
+                    <label style="text-align: left;">Select Your Department</label>
+                    <select id="onboard-department">
+                        <option value="">-- Select Department --</option>
+                    </select>
+                </div>
+
+                <button class="btn btn-primary" onclick="completeOnboarding()" style="width: 100%; margin-top: 20px;">
+                    Complete Setup
+                </button>
+
+                <p style="margin-top: 20px; font-size: 0.85em; color: #999;">
+                    You'll be assigned as a teacher for this department
+                </p>
+            </div>
+        </div>
 
         <div class="tabs">
             <button class="tab active" onclick="showTab('dashboard')">📊 Dashboard</button>
@@ -569,7 +614,7 @@
         <div id="dashboard" class="tab-content active">
             <h2>System Dashboard</h2>
             <div class="message" id="dashboard-message"></div>
-            
+
             <div class="stats-grid" id="stats-grid">
                 <div class="stat-card">
                     <h3 id="stat-departments">0</h3>
@@ -810,7 +855,8 @@
             <div class="message" id="validation-message"></div>
 
             <p style="margin-bottom: 20px;">
-                Validate the entire blockchain hierarchy including all department chains, class chains, and student chains.
+                Validate the entire blockchain hierarchy including all department chains, class chains, and student
+                chains.
                 This checks:
             </p>
             <ul style="margin-bottom: 20px; margin-left: 20px;">
@@ -828,4 +874,5 @@
 
     <script src="app.js"></script>
 </body>
+
 </html>

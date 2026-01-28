@@ -1,144 +1,469 @@
-// API Base URL
-// Version: 3.0 - Added UPDATE operations for Departments, Classes, and Students (CRUD complete)
-const API_BASE = 'http://localhost:3000/api';
+// =============================================
+// CLERK AUTHENTICATION SETUP
+// =============================================
 
-// Tab management
-function showTab(tabName) {
-    // Hide all tabs
-    document.querySelectorAll('.tab-content').forEach(tab => {
-        tab.classList.remove('active');
-    });
-    document.querySelectorAll('.tab').forEach(tab => {
-        tab.classList.remove('active');
-    });
+let clerk = null;
+let currentUser = null;
+let authToken = null;
 
-    // Show selected tab
-    document.getElementById(tabName).classList.add('active');
-    event.target.classList.add('active');
+// Wait for Clerk to load
+window.addEventListener('load', async () => {
+    // Wait for Clerk script to be available
+    const waitForClerk = setInterval(async () => {
+        if (window.Clerk) {
+            clearInterval(waitForClerk);
+            await initializeClerk();
+        }
+    }, 100);
+    
+    // Timeout after 10 seconds
+    setTimeout(() => {
+        clearInterval(waitForClerk);
+        if (!window.Clerk) {
+            document.getElementById('auth-loading').textContent = 'Auth failed to load';
+        }
+    }, 10000);
+});
 
-    // Load data for the tab
-    switch(tabName) {
-        case 'dashboard':
-            loadStats();
-            break;
-        case 'departments':
-            loadDepartments();
-            loadDepartmentsForUpdate();
-            break;
-        case 'classes':
-            loadClasses();
-            loadDepartmentsForSelect();
-            loadClassesForUpdate();
-            break;
-        case 'students':
-            loadStudents();
-            loadDepartmentsForSelect();
-            loadStudentsForUpdate();
-            break;
-        case 'attendance':
-            loadClassesForAttendance();
-            setTodayDate();
-            break;
-        case 'blockchain':
-            // Blockchain viewer is loaded on demand
-            break;
-        case 'validation':
-            // Validation is run on demand
-            break;
+async function initializeClerk() {
+    try {
+        console.log('Initializing Clerk...');
+        if (!window.Clerk) {
+            throw new Error('window.Clerk is undefined');
+        }
+        clerk = window.Clerk;
+        console.log('Clerk object found, calling load()...');
+        await clerk.load();
+        console.log('Clerk loaded successfully');
+        
+        // Check current auth state
+        await updateAuthUI();
+        
+        // Listen for auth changes
+        clerk.addListener(async () => {
+            await updateAuthUI();
+        });
+        
+        // Load initial data
+        loadStats();
+        loadDepartments();
+        loadClasses();
+        loadStudents();
+        
+    } catch (error) {
+        console.error('Failed to initialize Clerk:', error);
+        console.error('Error details:', JSON.stringify(error, null, 2));
+        
+        const authContainer = document.getElementById('auth-container');
+        if (authContainer) {
+            authContainer.innerHTML = `
+                <div style="color: #ff6b6b; font-size: 0.85em; display: flex; align-items: center; gap: 10px;">
+                    <span>Auth Error (Check Console)</span>
+                    <button onclick="location.reload()" class="btn" style="background: rgba(255,255,255,0.2); color: white; padding: 4px 8px; font-size: 0.8em; border: 1px solid rgba(255,255,255,0.3);">
+                        Retry
+                    </button>
+                </div>
+            `;
+        }
     }
 }
 
-// Message display
-function showMessage(elementId, message, type = 'success') {
-    const msgElement = document.getElementById(elementId);
-    msgElement.textContent = message;
-    msgElement.className = `message ${type} show`;
-    setTimeout(() => {
-        msgElement.classList.remove('show');
-    }, 5000);
+async function updateAuthUI() {
+    const authContainer = document.getElementById('auth-container');
+    
+    if (clerk.user) {
+        // User is signed in
+        currentUser = clerk.user;
+        authToken = await clerk.session.getToken();
+        
+        // Check if user has completed onboarding
+        const userInfo = await fetchUserInfo();
+        
+        if (userInfo && !userInfo.onboarded) {
+            // Show onboarding modal
+            showOnboardingModal();
+        }
+        
+        // Update UI with user info
+        authContainer.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <div style="text-align: right;">
+                    <div style="font-weight: bold; color: white;">${currentUser.firstName || currentUser.emailAddresses[0].emailAddress}</div>
+                    <div style="font-size: 0.8em; color: rgba(255,255,255,0.8);">${userInfo?.role || 'Loading...'} ${userInfo?.departmentName ? '- ' + userInfo.departmentName : ''}</div>
+                </div>
+                <button onclick="signOut()" class="btn" style="background: rgba(255,255,255,0.2); color: white; padding: 8px 16px;">
+                    Sign Out
+                </button>
+            </div>
+        `;
+        
+        // Show protected tabs
+        updateProtectedTabs(true, userInfo);
+        
+    } else {
+        // User is signed out
+        currentUser = null;
+        authToken = null;
+        
+        authContainer.innerHTML = `
+            <button onclick="signIn()" class="btn" style="background: white; color: #667eea; padding: 10px 20px; font-weight: bold;">
+                Sign In
+            </button>
+        `;
+        
+        // Hide protected tabs (but keep Blockchain visible)
+        updateProtectedTabs(false, null);
+    }
 }
 
-// ==================== DASHBOARD ====================
-
-async function loadStats() {
+async function fetchUserInfo() {
+    if (!authToken) return null;
+    
     try {
-        const response = await fetch(`${API_BASE}/system/stats`);
+        const response = await fetch('/api/auth/me', {
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+        const data = await response.json();
+        return data.success ? data.data : null;
+    } catch (error) {
+        console.error('Failed to fetch user info:', error);
+        return null;
+    }
+}
+
+function signIn() {
+    clerk.openSignIn();
+}
+
+function signOut() {
+    clerk.signOut();
+}
+
+// =============================================
+// ONBOARDING
+// =============================================
+
+async function showOnboardingModal() {
+    const modal = document.getElementById('onboarding-modal');
+    const departmentSelect = document.getElementById('onboard-department');
+    
+    // Load departments for dropdown
+    try {
+        const response = await fetch('/api/auth/departments');
+        const data = await response.json();
+        
+        if (data.success && data.data.length > 0) {
+            departmentSelect.innerHTML = '<option value="">-- Select Department --</option>';
+            data.data.forEach(dept => {
+                departmentSelect.innerHTML += `<option value="${dept.id}">${dept.name}</option>`;
+            });
+        } else {
+            departmentSelect.innerHTML = '<option value="">No departments available</option>';
+        }
+    } catch (error) {
+        console.error('Failed to load departments:', error);
+    }
+    
+    // Pre-fill name if available
+    if (currentUser && currentUser.firstName) {
+        document.getElementById('onboard-name').value = 
+            `${currentUser.firstName} ${currentUser.lastName || ''}`.trim();
+    }
+    
+    modal.style.display = 'flex';
+}
+
+async function completeOnboarding() {
+    const name = document.getElementById('onboard-name').value.trim();
+    const departmentId = document.getElementById('onboard-department').value;
+    
+    if (!name) {
+        alert('Please enter your name');
+        return;
+    }
+    
+    if (!departmentId) {
+        alert('Please select a department');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/auth/onboard', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({ name, departmentId })
+        });
+        
         const data = await response.json();
         
         if (data.success) {
-            document.getElementById('stat-departments').textContent = data.stats.totalDepartments;
-            document.getElementById('stat-classes').textContent = data.stats.totalClasses;
-            document.getElementById('stat-students').textContent = data.stats.totalStudents;
-            document.getElementById('stat-attendance').textContent = data.stats.totalAttendanceRecords;
+            document.getElementById('onboarding-modal').style.display = 'none';
+            await updateAuthUI();
+            showMessage('dashboard-message', 'Welcome! You are now set up as a teacher.', 'success');
+        } else {
+            alert(data.message || 'Onboarding failed');
         }
     } catch (error) {
-        console.error('Error loading stats:', error);
+        console.error('Onboarding error:', error);
+        alert('Failed to complete onboarding');
+    }
+}
+
+// =============================================
+// PROTECTED UI
+// =============================================
+
+function updateProtectedTabs(isAuthenticated, userInfo) {
+    const protectedTabs = ['dashboard', 'departments', 'classes', 'students', 'attendance'];
+    const publicTabs = ['blockchain', 'validation'];
+    
+    protectedTabs.forEach(tabId => {
+        const tab = document.querySelector(`[onclick="showTab('${tabId}')"]`);
+        const content = document.getElementById(tabId);
+        
+        if (tab && content) {
+            if (!isAuthenticated) {
+                tab.style.opacity = '0.5';
+                tab.style.pointerEvents = 'none';
+            } else {
+                tab.style.opacity = '1';
+                tab.style.pointerEvents = 'auto';
+                
+                // Special handling for departments tab - only admin can see create form
+                if (tabId === 'departments' && userInfo && userInfo.role !== 'admin') {
+                    const createForm = content.querySelector('div[style*="margin-bottom: 30px"]');
+                    if (createForm && createForm.querySelector('h3')?.textContent === 'Create Department') {
+                        createForm.style.display = 'none';
+                    }
+                }
+            }
+        }
+    });
+    
+    // Public tabs always accessible
+    publicTabs.forEach(tabId => {
+        const tab = document.querySelector(`[onclick="showTab('${tabId}')"]`);
+        if (tab) {
+            tab.style.opacity = '1';
+            tab.style.pointerEvents = 'auto';
+        }
+    });
+    
+    // If not authenticated and on protected tab, switch to blockchain
+    if (!isAuthenticated) {
+        const activeTab = document.querySelector('.tab-content.active');
+        if (activeTab && protectedTabs.includes(activeTab.id)) {
+            showTab('blockchain');
+        }
+    }
+}
+
+// =============================================
+// API HELPER - ADD AUTH HEADER
+// =============================================
+
+async function authenticatedFetch(url, options = {}) {
+    if (authToken) {
+        options.headers = {
+            ...options.headers,
+            'Authorization': `Bearer ${authToken}`
+        };
+    }
+    return fetch(url, options);
+}
+
+// =============================================
+// TAB NAVIGATION
+// =============================================
+
+function showTab(tabId) {
+    // Hide all tab contents
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.remove('active');
+    });
+    
+    // Deactivate all tabs
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    
+    // Show selected tab content
+    document.getElementById(tabId).classList.add('active');
+    
+    // Activate selected tab button
+    document.querySelector(`[onclick="showTab('${tabId}')"]`).classList.add('active');
+    
+    // Load data for specific tabs
+    if (tabId === 'dashboard') loadStats();
+    if (tabId === 'departments') loadDepartmentsList();
+    if (tabId === 'classes') loadClassesList();
+    if (tabId === 'students') loadStudentsList();
+}
+
+// =============================================
+// MESSAGE DISPLAY
+// =============================================
+
+function showMessage(elementId, message, type) {
+    const messageEl = document.getElementById(elementId);
+    messageEl.textContent = message;
+    messageEl.className = `message ${type} show`;
+    setTimeout(() => {
+        messageEl.classList.remove('show');
+    }, 5000);
+}
+
+// =============================================
+// DASHBOARD & STATS
+// =============================================
+
+async function loadStats() {
+    try {
+        const response = await fetch('/api/system/stats');
+        const data = await response.json();
+        
+        if (data.success) {
+            document.getElementById('stat-departments').textContent = data.data.totalDepartments || 0;
+            document.getElementById('stat-classes').textContent = data.data.totalClasses || 0;
+            document.getElementById('stat-students').textContent = data.data.totalStudents || 0;
+            document.getElementById('stat-attendance').textContent = data.data.totalAttendanceRecords || 0;
+        }
+    } catch (error) {
+        console.error('Failed to load stats:', error);
     }
 }
 
 async function initializeSystem() {
-    if (!confirm('This will create sample data (2 departments, 10 classes, 350 students). Continue?')) {
-        return;
-    }
-
     try {
-        showMessage('dashboard-message', 'Initializing system... This may take a few moments.', 'success');
-        const response = await fetch(`${API_BASE}/system/initialize`, {
-            method: 'POST'
-        });
+        const response = await authenticatedFetch('/api/system/initialize', { method: 'POST' });
         const data = await response.json();
         
         if (data.success) {
-            showMessage('dashboard-message', data.message, 'success');
+            showMessage('dashboard-message', 'System initialized with sample data!', 'success');
+            loadStats();
+            loadDepartments();
         } else {
-            showMessage('dashboard-message', data.message, 'error');
+            showMessage('dashboard-message', data.message || 'Initialization failed', 'error');
         }
     } catch (error) {
-        showMessage('dashboard-message', 'Error: ' + error.message, 'error');
+        showMessage('dashboard-message', 'Error initializing system', 'error');
     }
 }
 
 async function saveData() {
     try {
-        const response = await fetch(`${API_BASE}/system/save`, {
-            method: 'POST'
-        });
+        const response = await authenticatedFetch('/api/system/save', { method: 'POST' });
         const data = await response.json();
-        showMessage('dashboard-message', data.message, data.success ? 'success' : 'error');
+        showMessage('dashboard-message', data.success ? 'Data saved successfully!' : 'Save failed', data.success ? 'success' : 'error');
     } catch (error) {
-        showMessage('dashboard-message', 'Error: ' + error.message, 'error');
+        showMessage('dashboard-message', 'Error saving data', 'error');
     }
 }
 
 async function loadData() {
     try {
-        const response = await fetch(`${API_BASE}/system/load`, {
-            method: 'POST'
-        });
+        const response = await authenticatedFetch('/api/system/load', { method: 'POST' });
         const data = await response.json();
-        showMessage('dashboard-message', data.message, data.success ? 'success' : 'error');
+        if (data.success) {
+            showMessage('dashboard-message', 'Data loaded successfully!', 'success');
+            loadStats();
+        }
     } catch (error) {
-        showMessage('dashboard-message', 'Error: ' + error.message, 'error');
+        showMessage('dashboard-message', 'Error loading data', 'error');
     }
 }
 
-// ==================== DEPARTMENTS ====================
+// =============================================
+// DEPARTMENTS
+// =============================================
+
+let allDepartments = [];
+
+async function loadDepartments() {
+    try {
+        const response = await fetch('/api/departments');
+        const data = await response.json();
+        
+        if (data.success) {
+            allDepartments = data.data || [];
+            updateDepartmentDropdowns();
+        }
+    } catch (error) {
+        console.error('Failed to load departments:', error);
+    }
+}
+
+function updateDepartmentDropdowns() {
+    const dropdowns = ['class-dept', 'student-dept', 'dept-update-select'];
+    
+    dropdowns.forEach(id => {
+        const dropdown = document.getElementById(id);
+        if (dropdown) {
+            const currentValue = dropdown.value;
+            dropdown.innerHTML = '<option value="">-- Select Department --</option>';
+            allDepartments.forEach(dept => {
+                dropdown.innerHTML += `<option value="${dept.id}">${dept.name} (${dept.id})</option>`;
+            });
+            dropdown.value = currentValue;
+        }
+    });
+}
+
+async function loadDepartmentsList() {
+    const listEl = document.getElementById('dept-list');
+    listEl.innerHTML = '<div class="loading">Loading departments...</div>';
+    
+    try {
+        const response = await fetch('/api/departments');
+        const data = await response.json();
+        
+        if (data.success && data.data.length > 0) {
+            let html = '<table><thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+            
+            data.data.forEach(dept => {
+                html += `
+                    <tr>
+                        <td>${dept.id}</td>
+                        <td>${dept.name}</td>
+                        <td>${dept.status || 'active'}</td>
+                        <td>
+                            <button class="btn btn-primary" onclick="viewDepartmentBlockchain('${dept.id}')" style="padding: 5px 10px; font-size: 0.85em;">View Chain</button>
+                        </td>
+                    </tr>
+                `;
+            });
+            
+            html += '</tbody></table>';
+            listEl.innerHTML = html;
+        } else {
+            listEl.innerHTML = '<p style="text-align: center; color: #666;">No departments found</p>';
+        }
+    } catch (error) {
+        listEl.innerHTML = '<p style="color: red;">Error loading departments</p>';
+    }
+}
 
 async function createDepartment() {
-    const departmentId = document.getElementById('dept-id').value;
-    const departmentName = document.getElementById('dept-name').value;
-
-    if (!departmentId || !departmentName) {
+    const id = document.getElementById('dept-id').value.trim();
+    const name = document.getElementById('dept-name').value.trim();
+    
+    if (!id || !name) {
         showMessage('dept-message', 'Please fill in all fields', 'error');
         return;
     }
-
+    
     try {
-        const response = await fetch(`${API_BASE}/departments`, {
+        const response = await authenticatedFetch('/api/departments', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ departmentId, departmentName })
+            body: JSON.stringify({ departmentId: id, departmentName: name })
         });
+        
         const data = await response.json();
         
         if (data.success) {
@@ -146,213 +471,162 @@ async function createDepartment() {
             document.getElementById('dept-id').value = '';
             document.getElementById('dept-name').value = '';
             loadDepartments();
+            loadDepartmentsList();
+            loadStats();
         } else {
-            showMessage('dept-message', data.message, 'error');
+            showMessage('dept-message', data.message || 'Failed to create department', 'error');
         }
     } catch (error) {
-        showMessage('dept-message', 'Error: ' + error.message, 'error');
+        showMessage('dept-message', 'Error creating department', 'error');
     }
 }
 
-async function loadDepartments() {
-    try {
-        const response = await fetch(`${API_BASE}/departments`);
-        const data = await response.json();
-        
-        const container = document.getElementById('dept-list');
-        if (data.success && data.departments.length > 0) {
-            let html = '<table><thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
-            data.departments.forEach(dept => {
-                html += `
-                    <tr>
-                        <td>${dept.departmentId}</td>
-                        <td>${dept.departmentName}</td>
-                        <td><span style="color: ${dept.status === 'active' ? 'green' : 'red'}">${dept.status}</span></td>
-                        <td>
-                            <button class="btn btn-danger" onclick="deleteDepartment('${dept.departmentId}')" ${dept.status !== 'active' ? 'disabled' : ''}>Delete</button>
-                        </td>
-                    </tr>
-                `;
-            });
-            html += '</tbody></table>';
-            container.innerHTML = html;
-        } else {
-            container.innerHTML = '<p style="text-align: center; color: #666;">No departments found</p>';
+async function loadDepartmentForUpdate() {
+    const deptId = document.getElementById('dept-update-select').value;
+    if (deptId) {
+        const dept = allDepartments.find(d => d.id === deptId);
+        if (dept) {
+            document.getElementById('dept-update-name').value = dept.name;
         }
-    } catch (error) {
-        document.getElementById('dept-list').innerHTML = '<p style="text-align: center; color: red;">Error loading departments</p>';
-    }
-}
-
-async function deleteDepartment(departmentId) {
-    if (!confirm('Are you sure? This will mark the department and all its classes/students as deleted.')) {
-        return;
-    }
-
-    try {
-        const response = await fetch(`${API_BASE}/departments/${departmentId}`, {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ reason: 'Deleted by admin' })
-        });
-        const data = await response.json();
-        
-        if (data.success) {
-            showMessage('dept-message', data.message, 'success');
-            loadDepartments();
-        } else {
-            showMessage('dept-message', data.message, 'error');
-        }
-    } catch (error) {
-        showMessage('dept-message', 'Error: ' + error.message, 'error');
-    }
-}
-
-async function loadDepartmentsForUpdate() {
-    try {
-        const response = await fetch(`${API_BASE}/departments`);
-        const data = await response.json();
-        
-        const select = document.getElementById('dept-update-select');
-        let html = '<option value="">-- Select Department --</option>';
-        if (data.success && data.departments.length > 0) {
-            data.departments.forEach(dept => {
-                if (dept.status === 'active') {
-                    html += `<option value="${dept.departmentId}">${dept.departmentName} (${dept.departmentId})</option>`;
-                }
-            });
-        }
-        select.innerHTML = html;
-    } catch (error) {
-        console.error('Error loading departments for update:', error);
-    }
-}
-
-function loadDepartmentForUpdate() {
-    const selectElem = document.getElementById('dept-update-select');
-    const selectedText = selectElem.options[selectElem.selectedIndex].text;
-    if (selectedText && selectedText !== '-- Select Department --') {
-        const deptName = selectedText.split(' (')[0];
-        document.getElementById('dept-update-name').value = deptName;
     }
 }
 
 async function updateDepartment() {
-    const departmentId = document.getElementById('dept-update-select').value;
+    const deptId = document.getElementById('dept-update-select').value;
     const newName = document.getElementById('dept-update-name').value.trim();
-
-    if (!departmentId) {
-        showMessage('dept-message', 'Please select a department', 'error');
+    
+    if (!deptId || !newName) {
+        showMessage('dept-message', 'Please select a department and enter a new name', 'error');
         return;
     }
-
-    if (!newName) {
-        showMessage('dept-message', 'Please enter a new name', 'error');
-        return;
-    }
-
-    if (!confirm(`Update department ${departmentId} to "${newName}"?`)) {
-        return;
-    }
-
+    
     try {
-        const response = await fetch(`${API_BASE}/departments/${departmentId}`, {
+        const response = await authenticatedFetch(`/api/departments/${deptId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ updatedData: { name: newName } })
+            body: JSON.stringify({ name: newName })
         });
+        
         const data = await response.json();
         
         if (data.success) {
             showMessage('dept-message', 'Department updated successfully!', 'success');
-            document.getElementById('dept-update-select').value = '';
-            document.getElementById('dept-update-name').value = '';
             loadDepartments();
-            loadDepartmentsForUpdate();
+            loadDepartmentsList();
         } else {
-            showMessage('dept-message', data.message, 'error');
+            showMessage('dept-message', data.message || 'Failed to update department', 'error');
         }
     } catch (error) {
-        showMessage('dept-message', 'Error: ' + error.message, 'error');
+        showMessage('dept-message', 'Error updating department', 'error');
     }
 }
 
-async function searchDepartments() {
-    const searchTerm = document.getElementById('dept-search').value;
-    if (!searchTerm) {
-        loadDepartments();
-        return;
-    }
+function searchDepartments() {
+    const searchTerm = document.getElementById('dept-search').value.toLowerCase();
+    const rows = document.querySelectorAll('#dept-list tbody tr');
+    
+    rows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        row.style.display = text.includes(searchTerm) ? '' : 'none';
+    });
+}
 
+async function viewDepartmentBlockchain(deptId) {
+    showTab('blockchain');
+    document.getElementById('blockchain-type').value = 'department';
+    await updateEntitySelect();
+    document.getElementById('blockchain-entity').value = deptId;
+    viewBlockchain();
+}
+
+// =============================================
+// CLASSES
+// =============================================
+
+let allClasses = [];
+
+async function loadClasses() {
     try {
-        const response = await fetch(`${API_BASE}/departments/search/${searchTerm}`);
+        const response = await fetch('/api/classes');
         const data = await response.json();
         
-        const container = document.getElementById('dept-list');
-        if (data.success && data.results.length > 0) {
-            let html = '<table><thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
-            data.results.forEach(dept => {
+        if (data.success) {
+            allClasses = data.data || [];
+            updateClassDropdowns();
+        }
+    } catch (error) {
+        console.error('Failed to load classes:', error);
+    }
+}
+
+function updateClassDropdowns() {
+    const dropdowns = ['attendance-class', 'class-update-select'];
+    
+    dropdowns.forEach(id => {
+        const dropdown = document.getElementById(id);
+        if (dropdown) {
+            const currentValue = dropdown.value;
+            dropdown.innerHTML = '<option value="">-- Select Class --</option>';
+            allClasses.forEach(cls => {
+                dropdown.innerHTML += `<option value="${cls.id}">${cls.name} (${cls.departmentId})</option>`;
+            });
+            dropdown.value = currentValue;
+        }
+    });
+}
+
+async function loadClassesList() {
+    const listEl = document.getElementById('class-list');
+    listEl.innerHTML = '<div class="loading">Loading classes...</div>';
+    
+    try {
+        const response = await fetch('/api/classes');
+        const data = await response.json();
+        
+        if (data.success && data.data.length > 0) {
+            let html = '<table><thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+            
+            data.data.forEach(cls => {
                 html += `
                     <tr>
-                        <td>${dept.departmentId}</td>
-                        <td>${dept.departmentName}</td>
-                        <td><span style="color: ${dept.status === 'active' ? 'green' : 'red'}">${dept.status}</span></td>
+                        <td>${cls.id}</td>
+                        <td>${cls.name}</td>
+                        <td>${cls.departmentId}</td>
+                        <td>${cls.status || 'active'}</td>
                         <td>
-                            <button class="btn btn-danger" onclick="deleteDepartment('${dept.departmentId}')" ${dept.status !== 'active' ? 'disabled' : ''}>Delete</button>
+                            <button class="btn btn-primary" onclick="viewClassBlockchain('${cls.id}')" style="padding: 5px 10px; font-size: 0.85em;">View Chain</button>
                         </td>
                     </tr>
                 `;
             });
+            
             html += '</tbody></table>';
-            container.innerHTML = html;
+            listEl.innerHTML = html;
         } else {
-            container.innerHTML = '<p style="text-align: center; color: #666;">No results found</p>';
+            listEl.innerHTML = '<p style="text-align: center; color: #666;">No classes found</p>';
         }
     } catch (error) {
-        console.error('Error searching departments:', error);
-    }
-}
-
-// ==================== CLASSES ====================
-
-async function loadDepartmentsForSelect() {
-    try {
-        const response = await fetch(`${API_BASE}/departments`);
-        const data = await response.json();
-        
-        const select1 = document.getElementById('class-dept');
-        const select2 = document.getElementById('student-dept');
-        
-        let html = '<option value="">-- Select Department --</option>';
-        if (data.success) {
-            data.departments.filter(d => d.status === 'active').forEach(dept => {
-                html += `<option value="${dept.departmentId}">${dept.departmentName}</option>`;
-            });
-        }
-        
-        if (select1) select1.innerHTML = html;
-        if (select2) select2.innerHTML = html;
-    } catch (error) {
-        console.error('Error loading departments:', error);
+        listEl.innerHTML = '<p style="color: red;">Error loading classes</p>';
     }
 }
 
 async function createClass() {
-    const classId = document.getElementById('class-id').value;
-    const className = document.getElementById('class-name').value;
-    const departmentId = document.getElementById('class-dept').value;
-
-    if (!classId || !className || !departmentId) {
+    const id = document.getElementById('class-id').value.trim();
+    const name = document.getElementById('class-name').value.trim();
+    const deptId = document.getElementById('class-dept').value;
+    
+    if (!id || !name || !deptId) {
         showMessage('class-message', 'Please fill in all fields', 'error');
         return;
     }
-
+    
     try {
-        const response = await fetch(`${API_BASE}/classes`, {
+        const response = await authenticatedFetch('/api/classes', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ classId, className, departmentId })
+            body: JSON.stringify({ classId: id, className: name, departmentId: deptId })
         });
+        
         const data = await response.json();
         
         if (data.success) {
@@ -360,220 +634,189 @@ async function createClass() {
             document.getElementById('class-id').value = '';
             document.getElementById('class-name').value = '';
             loadClasses();
+            loadClassesList();
+            loadStats();
         } else {
-            showMessage('class-message', data.message, 'error');
+            showMessage('class-message', data.message || 'Failed to create class', 'error');
         }
     } catch (error) {
-        showMessage('class-message', 'Error: ' + error.message, 'error');
+        showMessage('class-message', 'Error creating class', 'error');
     }
 }
 
-async function loadClasses() {
-    try {
-        const response = await fetch(`${API_BASE}/classes`);
-        const data = await response.json();
-        
-        const container = document.getElementById('class-list');
-        if (data.success && data.classes.length > 0) {
-            let html = '<table><thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
-            data.classes.forEach(cls => {
-                html += `
-                    <tr>
-                        <td>${cls.classId}</td>
-                        <td>${cls.className}</td>
-                        <td>${cls.departmentId}</td>
-                        <td><span style="color: ${cls.status === 'active' ? 'green' : 'red'}">${cls.status}</span></td>
-                        <td>
-                            <button class="btn btn-danger" onclick="deleteClass('${cls.classId}')" ${cls.status !== 'active' ? 'disabled' : ''}>Delete</button>
-                        </td>
-                    </tr>
-                `;
-            });
-            html += '</tbody></table>';
-            container.innerHTML = html;
-        } else {
-            container.innerHTML = '<p style="text-align: center; color: #666;">No classes found</p>';
+async function loadClassForUpdate() {
+    const classId = document.getElementById('class-update-select').value;
+    if (classId) {
+        const cls = allClasses.find(c => c.id === classId);
+        if (cls) {
+            document.getElementById('class-update-name').value = cls.name;
         }
-    } catch (error) {
-        document.getElementById('class-list').innerHTML = '<p style="text-align: center; color: red;">Error loading classes</p>';
-    }
-}
-
-async function deleteClass(classId) {
-    if (!confirm('Are you sure? This will mark the class and all its students as deleted.')) {
-        return;
-    }
-
-    try {
-        const response = await fetch(`${API_BASE}/classes/${classId}`, {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ reason: 'Deleted by admin' })
-        });
-        const data = await response.json();
-        
-        if (data.success) {
-            showMessage('class-message', data.message, 'success');
-            loadClasses();
-        } else {
-            showMessage('class-message', data.message, 'error');
-        }
-    } catch (error) {
-        showMessage('class-message', 'Error: ' + error.message, 'error');
-    }
-}
-
-async function loadClassesForUpdate() {
-    try {
-        const response = await fetch(`${API_BASE}/classes`);
-        const data = await response.json();
-        
-        const select = document.getElementById('class-update-select');
-        let html = '<option value="">-- Select Class --</option>';
-        if (data.success && data.classes.length > 0) {
-            data.classes.forEach(cls => {
-                if (cls.status === 'active') {
-                    html += `<option value="${cls.classId}">${cls.className} (${cls.classId})</option>`;
-                }
-            });
-        }
-        select.innerHTML = html;
-    } catch (error) {
-        console.error('Error loading classes for update:', error);
-    }
-}
-
-function loadClassForUpdate() {
-    const selectElem = document.getElementById('class-update-select');
-    const selectedText = selectElem.options[selectElem.selectedIndex].text;
-    if (selectedText && selectedText !== '-- Select Class --') {
-        const className = selectedText.split(' (')[0];
-        document.getElementById('class-update-name').value = className;
     }
 }
 
 async function updateClass() {
     const classId = document.getElementById('class-update-select').value;
     const newName = document.getElementById('class-update-name').value.trim();
-
-    if (!classId) {
-        showMessage('class-message', 'Please select a class', 'error');
+    
+    if (!classId || !newName) {
+        showMessage('class-message', 'Please select a class and enter a new name', 'error');
         return;
     }
-
-    if (!newName) {
-        showMessage('class-message', 'Please enter a new name', 'error');
-        return;
-    }
-
-    if (!confirm(`Update class ${classId} to "${newName}"?`)) {
-        return;
-    }
-
+    
     try {
-        const response = await fetch(`${API_BASE}/classes/${classId}`, {
+        const response = await authenticatedFetch(`/api/classes/${classId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ updatedData: { name: newName } })
+            body: JSON.stringify({ name: newName })
         });
+        
         const data = await response.json();
         
         if (data.success) {
             showMessage('class-message', 'Class updated successfully!', 'success');
-            document.getElementById('class-update-select').value = '';
-            document.getElementById('class-update-name').value = '';
             loadClasses();
-            loadClassesForUpdate();
+            loadClassesList();
         } else {
-            showMessage('class-message', data.message, 'error');
+            showMessage('class-message', data.message || 'Failed to update class', 'error');
         }
     } catch (error) {
-        showMessage('class-message', 'Error: ' + error.message, 'error');
+        showMessage('class-message', 'Error updating class', 'error');
     }
 }
 
-async function searchClasses() {
-    const searchTerm = document.getElementById('class-search').value;
-    if (!searchTerm) {
-        loadClasses();
-        return;
-    }
+function searchClasses() {
+    const searchTerm = document.getElementById('class-search').value.toLowerCase();
+    const rows = document.querySelectorAll('#class-list tbody tr');
+    
+    rows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        row.style.display = text.includes(searchTerm) ? '' : 'none';
+    });
+}
 
+async function loadClassesForDept() {
+    const deptId = document.getElementById('student-dept').value;
+    const classDropdown = document.getElementById('student-class');
+    
+    classDropdown.innerHTML = '<option value="">-- Select Class --</option>';
+    
+    if (deptId) {
+        try {
+            const response = await fetch(`/api/classes/department/${deptId}`);
+            const data = await response.json();
+            
+            if (data.success && data.data.length > 0) {
+                data.data.forEach(cls => {
+                    classDropdown.innerHTML += `<option value="${cls.id}">${cls.name}</option>`;
+                });
+            }
+        } catch (error) {
+            console.error('Failed to load classes for department:', error);
+        }
+    }
+}
+
+async function viewClassBlockchain(classId) {
+    showTab('blockchain');
+    document.getElementById('blockchain-type').value = 'class';
+    await updateEntitySelect();
+    document.getElementById('blockchain-entity').value = classId;
+    viewBlockchain();
+}
+
+// =============================================
+// STUDENTS
+// =============================================
+
+let allStudents = [];
+
+async function loadStudents() {
     try {
-        const response = await fetch(`${API_BASE}/classes/search/${searchTerm}`);
+        const response = await fetch('/api/students');
         const data = await response.json();
         
-        const container = document.getElementById('class-list');
-        if (data.success && data.results.length > 0) {
-            let html = '<table><thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
-            data.results.forEach(cls => {
+        if (data.success) {
+            allStudents = data.data || [];
+            updateStudentDropdowns();
+        }
+    } catch (error) {
+        console.error('Failed to load students:', error);
+    }
+}
+
+function updateStudentDropdowns() {
+    const dropdown = document.getElementById('student-update-select');
+    if (dropdown) {
+        const currentValue = dropdown.value;
+        dropdown.innerHTML = '<option value="">-- Select Student --</option>';
+        allStudents.forEach(student => {
+            dropdown.innerHTML += `<option value="${student.id}">${student.name} (${student.rollNumber})</option>`;
+        });
+        dropdown.value = currentValue;
+    }
+}
+
+async function loadStudentsList() {
+    const listEl = document.getElementById('student-list');
+    listEl.innerHTML = '<div class="loading">Loading students...</div>';
+    
+    try {
+        const response = await fetch('/api/students');
+        const data = await response.json();
+        
+        if (data.success && data.data.length > 0) {
+            let html = '<table><thead><tr><th>ID</th><th>Name</th><th>Roll No</th><th>Class</th><th>Department</th><th>Actions</th></tr></thead><tbody>';
+            
+            data.data.forEach(student => {
                 html += `
                     <tr>
-                        <td>${cls.classId}</td>
-                        <td>${cls.className}</td>
-                        <td>${cls.departmentId}</td>
-                        <td><span style="color: ${cls.status === 'active' ? 'green' : 'red'}">${cls.status}</span></td>
+                        <td>${student.id}</td>
+                        <td>${student.name}</td>
+                        <td>${student.rollNumber}</td>
+                        <td>${student.classId}</td>
+                        <td>${student.departmentId}</td>
                         <td>
-                            <button class="btn btn-danger" onclick="deleteClass('${cls.classId}')" ${cls.status !== 'active' ? 'disabled' : ''}>Delete</button>
+                            <button class="btn btn-primary" onclick="viewStudentBlockchain('${student.id}')" style="padding: 5px 10px; font-size: 0.85em;">View Chain</button>
                         </td>
                     </tr>
                 `;
             });
+            
             html += '</tbody></table>';
-            container.innerHTML = html;
+            listEl.innerHTML = html;
         } else {
-            container.innerHTML = '<p style="text-align: center; color: #666;">No results found</p>';
+            listEl.innerHTML = '<p style="text-align: center; color: #666;">No students found</p>';
         }
     } catch (error) {
-        console.error('Error searching classes:', error);
-    }
-}
-
-// ==================== STUDENTS ====================
-
-async function loadClassesForDept() {
-    const departmentId = document.getElementById('student-dept').value;
-    const classSelect = document.getElementById('student-class');
-    
-    if (!departmentId) {
-        classSelect.innerHTML = '<option value="">-- Select Class --</option>';
-        return;
-    }
-
-    try {
-        const response = await fetch(`${API_BASE}/classes/department/${departmentId}`);
-        const data = await response.json();
-        
-        let html = '<option value="">-- Select Class --</option>';
-        if (data.success) {
-            data.classes.filter(c => c.status === 'active').forEach(cls => {
-                html += `<option value="${cls.classId}">${cls.className}</option>`;
-            });
-        }
-        classSelect.innerHTML = html;
-    } catch (error) {
-        console.error('Error loading classes:', error);
+        listEl.innerHTML = '<p style="color: red;">Error loading students</p>';
     }
 }
 
 async function createStudent() {
-    const studentId = document.getElementById('student-id').value;
-    const studentName = document.getElementById('student-name').value;
-    const rollNumber = document.getElementById('student-roll').value;
-    const departmentId = document.getElementById('student-dept').value;
+    const id = document.getElementById('student-id').value.trim();
+    const name = document.getElementById('student-name').value.trim();
+    const roll = document.getElementById('student-roll').value.trim();
+    const deptId = document.getElementById('student-dept').value;
     const classId = document.getElementById('student-class').value;
-
-    if (!studentId || !studentName || !rollNumber || !departmentId || !classId) {
+    
+    if (!id || !name || !roll || !deptId || !classId) {
         showMessage('student-message', 'Please fill in all fields', 'error');
         return;
     }
-
+    
     try {
-        const response = await fetch(`${API_BASE}/students`, {
+        const response = await authenticatedFetch('/api/students', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ studentId, studentName, rollNumber, classId, departmentId })
+            body: JSON.stringify({ 
+                studentId: id, 
+                studentName: name, 
+                rollNumber: roll,
+                departmentId: deptId,
+                classId: classId
+            })
         });
+        
         const data = await response.json();
         
         if (data.success) {
@@ -582,99 +825,24 @@ async function createStudent() {
             document.getElementById('student-name').value = '';
             document.getElementById('student-roll').value = '';
             loadStudents();
+            loadStudentsList();
+            loadStats();
         } else {
-            showMessage('student-message', data.message, 'error');
+            showMessage('student-message', data.message || 'Failed to create student', 'error');
         }
     } catch (error) {
-        showMessage('student-message', 'Error: ' + error.message, 'error');
+        showMessage('student-message', 'Error creating student', 'error');
     }
 }
 
-async function loadStudents() {
-    try {
-        const response = await fetch(`${API_BASE}/students`);
-        const data = await response.json();
-        
-        const container = document.getElementById('student-list');
-        if (data.success && data.students.length > 0) {
-            let html = '<table><thead><tr><th>ID</th><th>Name</th><th>Roll No</th><th>Class</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
-            data.students.forEach(student => {
-                html += `
-                    <tr>
-                        <td>${student.studentId}</td>
-                        <td>${student.studentName}</td>
-                        <td>${student.rollNumber}</td>
-                        <td>${student.classId}</td>
-                        <td><span style="color: ${student.status === 'active' ? 'green' : 'red'}">${student.status}</span></td>
-                        <td>
-                            <button class="btn btn-warning" onclick="viewStudentAttendance('${student.studentId}')">View Attendance</button>
-                            <button class="btn btn-danger" onclick="deleteStudent('${student.studentId}')" ${student.status !== 'active' ? 'disabled' : ''}>Delete</button>
-                        </td>
-                    </tr>
-                `;
-            });
-            html += '</tbody></table>';
-            container.innerHTML = html;
-        } else {
-            container.innerHTML = '<p style="text-align: center; color: #666;">No students found</p>';
+async function loadStudentForUpdate() {
+    const studentId = document.getElementById('student-update-select').value;
+    if (studentId) {
+        const student = allStudents.find(s => s.id === studentId);
+        if (student) {
+            document.getElementById('student-update-name').value = student.name;
+            document.getElementById('student-update-roll').value = student.rollNumber;
         }
-    } catch (error) {
-        document.getElementById('student-list').innerHTML = '<p style="text-align: center; color: red;">Error loading students</p>';
-    }
-}
-
-async function deleteStudent(studentId) {
-    if (!confirm('Are you sure you want to delete this student?')) {
-        return;
-    }
-
-    try {
-        const response = await fetch(`${API_BASE}/students/${studentId}`, {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ reason: 'Deleted by admin' })
-        });
-        const data = await response.json();
-        
-        if (data.success) {
-            showMessage('student-message', data.message, 'success');
-            loadStudents();
-        } else {
-            showMessage('student-message', data.message, 'error');
-        }
-    } catch (error) {
-        showMessage('student-message', 'Error: ' + error.message, 'error');
-    }
-}
-
-async function loadStudentsForUpdate() {
-    try {
-        const response = await fetch(`${API_BASE}/students`);
-        const data = await response.json();
-        
-        const select = document.getElementById('student-update-select');
-        let html = '<option value="">-- Select Student --</option>';
-        if (data.success && data.students.length > 0) {
-            data.students.forEach(student => {
-                if (student.status === 'active') {
-                    html += `<option value="${student.studentId}" data-name="${student.studentName}" data-roll="${student.rollNumber}">${student.studentName} (${student.studentId})</option>`;
-                }
-            });
-        }
-        select.innerHTML = html;
-    } catch (error) {
-        console.error('Error loading students for update:', error);
-    }
-}
-
-function loadStudentForUpdate() {
-    const selectElem = document.getElementById('student-update-select');
-    const selectedOption = selectElem.options[selectElem.selectedIndex];
-    if (selectedOption.value) {
-        const studentName = selectedOption.getAttribute('data-name');
-        const rollNumber = selectedOption.getAttribute('data-roll');
-        document.getElementById('student-update-name').value = studentName;
-        document.getElementById('student-update-roll').value = rollNumber;
     }
 }
 
@@ -682,630 +850,365 @@ async function updateStudent() {
     const studentId = document.getElementById('student-update-select').value;
     const newName = document.getElementById('student-update-name').value.trim();
     const newRoll = document.getElementById('student-update-roll').value.trim();
-
+    
     if (!studentId) {
         showMessage('student-message', 'Please select a student', 'error');
         return;
     }
-
-    if (!newName && !newRoll) {
-        showMessage('student-message', 'Please enter at least one field to update', 'error');
-        return;
-    }
-
-    if (!confirm(`Update student ${studentId}?`)) {
-        return;
-    }
-
+    
     try {
-        const updatedData = {};
-        if (newName) updatedData.name = newName;
-        if (newRoll) updatedData.rollNumber = newRoll;
-
-        const response = await fetch(`${API_BASE}/students/${studentId}`, {
+        const response = await authenticatedFetch(`/api/students/${studentId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ updatedData })
+            body: JSON.stringify({ name: newName, rollNumber: newRoll })
         });
+        
         const data = await response.json();
         
         if (data.success) {
             showMessage('student-message', 'Student updated successfully!', 'success');
-            document.getElementById('student-update-select').value = '';
-            document.getElementById('student-update-name').value = '';
-            document.getElementById('student-update-roll').value = '';
             loadStudents();
-            loadStudentsForUpdate();
+            loadStudentsList();
         } else {
-            showMessage('student-message', data.message, 'error');
+            showMessage('student-message', data.message || 'Failed to update student', 'error');
         }
     } catch (error) {
-        showMessage('student-message', 'Error: ' + error.message, 'error');
+        showMessage('student-message', 'Error updating student', 'error');
     }
 }
 
-async function searchStudents() {
-    const searchTerm = document.getElementById('student-search').value;
-    if (!searchTerm) {
-        loadStudents();
-        return;
-    }
-
-    try {
-        const response = await fetch(`${API_BASE}/students/search/${searchTerm}`);
-        const data = await response.json();
-        
-        const container = document.getElementById('student-list');
-        if (data.success && data.results.length > 0) {
-            let html = '<table><thead><tr><th>ID</th><th>Name</th><th>Roll No</th><th>Class</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
-            data.results.forEach(student => {
-                html += `
-                    <tr>
-                        <td>${student.studentId}</td>
-                        <td>${student.studentName}</td>
-                        <td>${student.rollNumber}</td>
-                        <td>${student.classId}</td>
-                        <td><span style="color: ${student.status === 'active' ? 'green' : 'red'}">${student.status}</span></td>
-                        <td>
-                            <button class="btn btn-warning" onclick="viewStudentAttendance('${student.studentId}')">View Attendance</button>
-                            <button class="btn btn-danger" onclick="deleteStudent('${student.studentId}')" ${student.status !== 'active' ? 'disabled' : ''}>Delete</button>
-                        </td>
-                    </tr>
-                `;
-            });
-            html += '</tbody></table>';
-            container.innerHTML = html;
-        } else {
-            container.innerHTML = '<p style="text-align: center; color: #666;">No results found</p>';
-        }
-    } catch (error) {
-        console.error('Error searching students:', error);
-    }
+function searchStudents() {
+    const searchTerm = document.getElementById('student-search').value.toLowerCase();
+    const rows = document.querySelectorAll('#student-list tbody tr');
+    
+    rows.forEach(row => {
+        const text = row.textContent.toLowerCase();
+        row.style.display = text.includes(searchTerm) ? '' : 'none';
+    });
 }
 
-async function viewStudentAttendance(studentId) {
-    try {
-        const response = await fetch(`${API_BASE}/attendance/student/${studentId}`);
-        const data = await response.json();
-        
-        if (data.success) {
-            const { student, summary, history } = data.attendance;
-            let html = `
-                <div style="background: white; padding: 20px; border-radius: 10px; margin-top: 20px;">
-                    <h3>${student.studentName} (${student.rollNumber})</h3>
-                    <p><strong>Present:</strong> ${summary.totalPresent} | <strong>Absent:</strong> ${summary.totalAbsent} | <strong>Leave:</strong> ${summary.totalLeave}</p>
-                    <p><strong>Attendance Percentage:</strong> ${summary.attendancePercentage}%</p>
-                    <h4>Attendance History:</h4>
-            `;
-            
-            if (history.length > 0) {
-                html += '<table><thead><tr><th>Block</th><th>Date</th><th>Status</th><th>Marked By</th><th>Hash</th></tr></thead><tbody>';
-                history.forEach(record => {
-                    html += `
-                        <tr>
-                            <td>#${record.blockIndex}</td>
-                            <td>${record.date}</td>
-                            <td><span style="color: ${record.status === 'Present' ? 'green' : record.status === 'Absent' ? 'red' : 'orange'}">${record.status}</span></td>
-                            <td>${record.markedBy}</td>
-                            <td class="hash">${record.hash.substring(0, 16)}...</td>
-                        </tr>
-                    `;
-                });
-                html += '</tbody></table>';
-            } else {
-                html += '<p>No attendance records found.</p>';
-            }
-            
-            html += '</div>';
-            
-            const container = document.getElementById('student-list');
-            container.innerHTML = html + '<br><button class="btn btn-primary" onclick="loadStudents()">Back to Students</button>';
-        }
-    } catch (error) {
-        console.error('Error viewing attendance:', error);
-    }
+async function viewStudentBlockchain(studentId) {
+    showTab('blockchain');
+    document.getElementById('blockchain-type').value = 'student';
+    await updateEntitySelect();
+    document.getElementById('blockchain-entity').value = studentId;
+    viewBlockchain();
 }
 
-// ==================== ATTENDANCE ====================
-
-function setTodayDate() {
-    const today = new Date().toISOString().split('T')[0];
-    document.getElementById('attendance-date').value = today;
-}
-
-async function loadClassesForAttendance() {
-    try {
-        const response = await fetch(`${API_BASE}/classes`);
-        const data = await response.json();
-        
-        const select = document.getElementById('attendance-class');
-        let html = '<option value="">-- Select Class --</option>';
-        if (data.success) {
-            data.classes.filter(c => c.status === 'active').forEach(cls => {
-                html += `<option value="${cls.classId}">${cls.className} (${cls.departmentId})</option>`;
-            });
-        }
-        select.innerHTML = html;
-    } catch (error) {
-        console.error('Error loading classes:', error);
-    }
-}
+// =============================================
+// ATTENDANCE
+// =============================================
 
 async function loadStudentsForAttendance() {
     const classId = document.getElementById('attendance-class').value;
-    const container = document.getElementById('attendance-list');
+    const listEl = document.getElementById('attendance-list');
     
     if (!classId) {
-        container.innerHTML = '<p style="text-align: center; color: #666;">Select a class to mark attendance</p>';
+        listEl.innerHTML = '<p style="text-align: center; color: #666;">Select a class to mark attendance</p>';
         return;
     }
-
+    
+    listEl.innerHTML = '<div class="loading">Loading students...</div>';
+    
     try {
-        const response = await fetch(`${API_BASE}/students/class/${classId}`);
+        const response = await fetch(`/api/students/class/${classId}`);
         const data = await response.json();
         
-        if (data.success && data.students.length > 0) {
+        if (data.success && data.data.length > 0) {
             let html = '<div class="attendance-grid">';
-            data.students.filter(s => s.status === 'active').forEach(student => {
+            
+            data.data.forEach(student => {
                 html += `
-                    <div class="student-attendance">
+                    <div class="student-attendance" id="attendance-${student.id}">
                         <div class="student-info">
-                            <h4>${student.studentName}</h4>
-                            <p>Roll No: ${student.rollNumber} | ID: ${student.studentId}</p>
+                            <h4>${student.name}</h4>
+                            <p>Roll: ${student.rollNumber} | ID: ${student.id}</p>
                         </div>
                         <div class="attendance-buttons">
-                            <button class="btn-present" onclick="markAttendance('${student.studentId}', 'Present')">Present</button>
-                            <button class="btn-absent" onclick="markAttendance('${student.studentId}', 'Absent')">Absent</button>
-                            <button class="btn-leave" onclick="markAttendance('${student.studentId}', 'Leave')">Leave</button>
+                            <button class="btn-present" onclick="markAttendance('${student.id}', 'Present')">Present</button>
+                            <button class="btn-absent" onclick="markAttendance('${student.id}', 'Absent')">Absent</button>
+                            <button class="btn-leave" onclick="markAttendance('${student.id}', 'Leave')">Leave</button>
                         </div>
                     </div>
                 `;
             });
+            
             html += '</div>';
-            container.innerHTML = html;
+            listEl.innerHTML = html;
         } else {
-            container.innerHTML = '<p style="text-align: center; color: #666;">No active students found in this class</p>';
+            listEl.innerHTML = '<p style="text-align: center; color: #666;">No students found in this class</p>';
         }
     } catch (error) {
-        container.innerHTML = '<p style="text-align: center; color: red;">Error loading students</p>';
+        listEl.innerHTML = '<p style="color: red;">Error loading students</p>';
     }
 }
 
 async function markAttendance(studentId, status) {
-    const date = document.getElementById('attendance-date').value;
+    const date = document.getElementById('attendance-date').value || new Date().toISOString().split('T')[0];
     
-    if (!date) {
-        showMessage('attendance-message', 'Please select a date', 'error');
-        return;
-    }
-
     try {
-        const response = await fetch(`${API_BASE}/attendance/mark`, {
+        const response = await authenticatedFetch('/api/attendance/mark', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ studentId, status, date, markedBy: 'admin' })
+            body: JSON.stringify({ studentId, status, date })
         });
+        
         const data = await response.json();
         
         if (data.success) {
-            showMessage('attendance-message', `Marked ${status} for student ${studentId}`, 'success');
+            const studentEl = document.getElementById(`attendance-${studentId}`);
+            if (studentEl) {
+                studentEl.style.background = status === 'Present' ? '#d4edda' : 
+                                             status === 'Absent' ? '#f8d7da' : '#fff3cd';
+            }
+            showMessage('attendance-message', `Marked ${status} for student (by ${data.data.markedBy})`, 'success');
         } else {
-            showMessage('attendance-message', data.message, 'error');
+            showMessage('attendance-message', data.message || 'Failed to mark attendance', 'error');
         }
     } catch (error) {
-        showMessage('attendance-message', 'Error: ' + error.message, 'error');
+        showMessage('attendance-message', 'Error marking attendance', 'error');
     }
 }
 
-// ==================== BLOCKCHAIN ====================
+// Set default date for attendance
+document.addEventListener('DOMContentLoaded', () => {
+    const dateInput = document.getElementById('attendance-date');
+    if (dateInput) {
+        dateInput.value = new Date().toISOString().split('T')[0];
+    }
+});
+
+// =============================================
+// BLOCKCHAIN VIEWER
+// =============================================
 
 async function updateEntitySelect() {
     const type = document.getElementById('blockchain-type').value;
     const entitySelect = document.getElementById('blockchain-entity');
     
-    if (!type) {
-        entitySelect.innerHTML = '<option value="">-- Select Entity --</option>';
-        return;
-    }
-
+    entitySelect.innerHTML = '<option value="">-- Select --</option>';
+    
+    if (!type) return;
+    
     try {
-        let endpoint = '';
-        if (type === 'department') endpoint = '/departments';
-        else if (type === 'class') endpoint = '/classes';
-        else if (type === 'student') endpoint = '/students';
-
-        console.log('Fetching entities from:', endpoint);
-        const response = await fetch(`${API_BASE}${endpoint}`);
-        const data = await response.json();
-        console.log('Entities data:', data);
+        let response;
+        if (type === 'department') {
+            response = await fetch('/api/departments');
+        } else if (type === 'class') {
+            response = await fetch('/api/classes');
+        } else if (type === 'student') {
+            response = await fetch('/api/students');
+        }
         
-        let html = '<option value="">-- Select Entity --</option>';
-        if (data.success) {
-            const items = data.departments || data.classes || data.students;
-            console.log('Items to display:', items);
-            items.forEach(item => {
-                let id, name;
-                // Get the correct ID and name based on entity type
-                if (type === 'department') {
-                    id = item.departmentId;
-                    name = item.departmentName;
-                } else if (type === 'class') {
-                    id = item.classId;
-                    name = item.className;
-                } else if (type === 'student') {
-                    id = item.studentId;
-                    name = item.studentName;
-                }
-                console.log('Adding option:', id, name);
-                html += `<option value="${id}">${name} (${id})</option>`;
+        const data = await response.json();
+        
+        if (data.success && data.data.length > 0) {
+            data.data.forEach(item => {
+                const label = item.name + (item.rollNumber ? ` (${item.rollNumber})` : ` (${item.id})`);
+                entitySelect.innerHTML += `<option value="${item.id}">${label}</option>`;
             });
         }
-        entitySelect.innerHTML = html;
     } catch (error) {
-        console.error('Error loading entities:', error);
+        console.error('Failed to load entities:', error);
     }
 }
 
 async function viewBlockchain() {
     const type = document.getElementById('blockchain-type').value;
     const entityId = document.getElementById('blockchain-entity').value;
-    const container = document.getElementById('blockchain-viewer');
+    const viewer = document.getElementById('blockchain-viewer');
     
     if (!type || !entityId) {
-        showMessage('blockchain-message', 'Please select type and entity', 'error');
+        viewer.innerHTML = '<p style="color: #666;">Please select type and entity</p>';
         return;
     }
-
+    
+    viewer.innerHTML = '<div class="loading">Loading blockchain...</div>';
+    
     try {
-        let endpoint = '';
-        if (type === 'department') endpoint = `/departments/${entityId}/blockchain`;
-        else if (type === 'class') endpoint = `/classes/${entityId}/blockchain`;
-        else if (type === 'student') endpoint = `/students/${entityId}/blockchain`;
-
-        console.log('Fetching blockchain for:', type, entityId, 'from endpoint:', endpoint);
-        const response = await fetch(`${API_BASE}${endpoint}`);
+        let url;
+        if (type === 'department') {
+            url = `/api/departments/${entityId}/blockchain`;
+        } else if (type === 'class') {
+            url = `/api/classes/${entityId}/blockchain`;
+        } else if (type === 'student') {
+            url = `/api/students/${entityId}/blockchain`;
+        }
+        
+        const response = await fetch(url);
         const data = await response.json();
-        console.log('Blockchain response:', data);
         
         if (data.success) {
-            const blockchain = data.blockchain;
-            let html = `
-                <div class="blockchain-viewer">
-                    <h3>${blockchain.name} Blockchain</h3>
-                    <p><strong>Chain Length:</strong> ${blockchain.chainLength} blocks</p>
-                    <p><strong>Valid:</strong> <span style="color: ${blockchain.isValid ? 'green' : 'red'}">${blockchain.isValid ? 'Yes' : 'No'}</span></p>
-            `;
-            
-            if (blockchain.parentDepartmentHash) {
-                html += `<p><strong>Parent Department Hash:</strong> <span class="hash">${blockchain.parentDepartmentHash}</span></p>`;
-            }
-            if (blockchain.parentClassHash) {
-                html += `<p><strong>Parent Class Hash:</strong> <span class="hash">${blockchain.parentClassHash}</span></p>`;
-            }
-            
-            html += '<h4>Blocks:</h4>';
-            blockchain.blocks.forEach(block => {
-                html += `
-                    <div class="block">
-                        <h4>Block #${block.index}</h4>
-                        <div class="block-info">
-                            <div><strong>Timestamp:</strong> ${new Date(block.timestamp).toLocaleString()}</div>
-                            <div><strong>Nonce:</strong> ${block.nonce}</div>
-                            <div><strong>Transaction Type:</strong> ${block.transactions.type || 'N/A'}</div>
-                            <div><strong>Action:</strong> ${block.transactions.action || 'N/A'}</div>
-                        </div>
-                `;
-
-                // Show transaction data based on type
-                if (block.transactions.type === 'department_created' || 
-                    block.transactions.type === 'class_created' || 
-                    block.transactions.type === 'student_created') {
-                    html += `
-                        <div style="margin-top: 10px; padding: 10px; background: #e8f5e9; border-radius: 5px;">
-                            <strong>📝 Created Data:</strong>
-                            <div style="margin-top: 5px;">
-                                ${block.transactions.departmentName ? `<div>Name: ${block.transactions.departmentName}</div>` : ''}
-                                ${block.transactions.className ? `<div>Name: ${block.transactions.className}</div>` : ''}
-                                ${block.transactions.studentName ? `<div>Name: ${block.transactions.studentName}</div>` : ''}
-                                ${block.transactions.rollNumber ? `<div>Roll Number: ${block.transactions.rollNumber}</div>` : ''}
-                            </div>
-                        </div>
-                    `;
-                }
-
-                if (block.transactions.type === 'department_updated' || 
-                    block.transactions.type === 'class_updated' || 
-                    block.transactions.type === 'student_updated') {
-                    html += `
-                        <div style="margin-top: 10px; padding: 10px; background: #fff3e0; border-radius: 5px;">
-                            <strong>📝 Updated Data:</strong>
-                            ${block.transactions.previousData ? `
-                                <div style="margin-top: 5px;">
-                                    <strong>Previous:</strong>
-                                    ${block.transactions.previousData.departmentName ? `<div>Name: ${block.transactions.previousData.departmentName}</div>` : ''}
-                                    ${block.transactions.previousData.className ? `<div>Name: ${block.transactions.previousData.className}</div>` : ''}
-                                    ${block.transactions.previousData.studentName ? `<div>Name: ${block.transactions.previousData.studentName}</div>` : ''}
-                                    ${block.transactions.previousData.rollNumber ? `<div>Roll Number: ${block.transactions.previousData.rollNumber}</div>` : ''}
-                                </div>
-                            ` : ''}
-                            ${block.transactions.updatedData ? `
-                                <div style="margin-top: 5px;">
-                                    <strong>New:</strong>
-                                    ${block.transactions.updatedData.name ? `<div>Name: ${block.transactions.updatedData.name}</div>` : ''}
-                                    ${block.transactions.updatedData.rollNumber ? `<div>Roll Number: ${block.transactions.updatedData.rollNumber}</div>` : ''}
-                                </div>
-                            ` : ''}
-                        </div>
-                    `;
-                }
-
-                if (block.transactions.type === 'attendance') {
-                    html += `
-                        <div style="margin-top: 10px; padding: 10px; background: #e3f2fd; border-radius: 5px;">
-                            <strong>📅 Attendance:</strong>
-                            <div style="margin-top: 5px;">
-                                <div>Student: ${block.transactions.studentName}</div>
-                                <div>Status: <strong>${block.transactions.status}</strong></div>
-                                <div>Date: ${block.transactions.date}</div>
-                            </div>
-                        </div>
-                    `;
-                }
-
-                html += `
-                        <div style="margin-top: 10px;">
-                            <div><strong>Previous Hash:</strong> <span class="hash">${block.prev_hash}</span></div>
-                            <div><strong>Current Hash:</strong> <span class="hash">${block.hash}</span></div>
-                        </div>
-                        ${block.transactions.status ? `<div style="margin-top: 10px;"><strong>Status:</strong> ${block.transactions.status}</div>` : ''}
-                    </div>
-                `;
-            });
-            
-            html += '</div>';
-            container.innerHTML = html;
+            displayBlockchain(data.data, type);
         } else {
-            showMessage('blockchain-message', data.message, 'error');
+            viewer.innerHTML = `<p style="color: red;">${data.message || 'Failed to load blockchain'}</p>`;
         }
     } catch (error) {
-        showMessage('blockchain-message', 'Error: ' + error.message, 'error');
+        viewer.innerHTML = '<p style="color: red;">Error loading blockchain</p>';
     }
 }
 
-// ==================== TREE VISUALIZATION ====================
-
-async function visualizeBlockchainTree() {
-    const container = document.getElementById('blockchain-tree');
-    container.innerHTML = '<div class="loading">Building blockchain tree...</div>';
-
-    try {
-        // Fetch all data
-        const [deptRes, classRes, studentRes] = await Promise.all([
-            fetch(`${API_BASE}/departments`),
-            fetch(`${API_BASE}/classes`),
-            fetch(`${API_BASE}/students`)
-        ]);
-
-        const [deptData, classData, studentData] = await Promise.all([
-            deptRes.json(),
-            classRes.json(),
-            studentRes.json()
-        ]);
-
-        if (!deptData.success || !classData.success || !studentData.success) {
-            throw new Error('Failed to fetch blockchain data');
-        }
-
-        const departments = deptData.departments;
-        const classes = classData.classes;
-        const students = studentData.students;
-
-        // Calculate stats
-        const stats = {
-            departments: departments.length,
-            classes: classes.length,
-            students: students.length,
-            activeStudents: students.filter(s => s.status === 'active').length
-        };
-
-        let html = `
-            <div class="tree-container">
-                <div class="tree-stats">
-                    <div class="tree-stat-item">
-                        <div class="tree-stat-number">${stats.departments}</div>
-                        <div class="tree-stat-label">Departments</div>
-                    </div>
-                    <div class="tree-stat-item">
-                        <div class="tree-stat-number">${stats.classes}</div>
-                        <div class="tree-stat-label">Classes</div>
-                    </div>
-                    <div class="tree-stat-item">
-                        <div class="tree-stat-number">${stats.students}</div>
-                        <div class="tree-stat-label">Students</div>
-                    </div>
-                    <div class="tree-stat-item">
-                        <div class="tree-stat-number">${stats.activeStudents}</div>
-                        <div class="tree-stat-label">Active Students</div>
-                    </div>
-                </div>
-
-                <div class="legend">
-                    <div class="legend-item">
-                        <div class="legend-color layer-1"></div>
-                        <span>Layer 1: Departments</span>
-                    </div>
-                    <div class="legend-item">
-                        <div class="legend-color layer-2"></div>
-                        <span>Layer 2: Classes</span>
-                    </div>
-                    <div class="legend-item">
-                        <div class="legend-color layer-3"></div>
-                        <span>Layer 3: Students</span>
-                    </div>
-                </div>
-
-                <div class="tree-diagram">
-        `;
-
-        // Build hierarchical tree
-        departments.forEach((dept, deptIndex) => {
-            const deptClasses = classes.filter(c => c.departmentId === dept.departmentId);
-            
-            html += `
-                <div class="tree-branch" style="margin-bottom: 60px;">
-                    <div class="tree-node layer-1">
-                        <div class="tree-node-title">🏢 ${dept.departmentName}</div>
-                        <div class="tree-node-id">${dept.departmentId}</div>
-                        <div class="tree-node-info">
-                            Status: ${dept.status} | ${deptClasses.length} Classes
-                        </div>
-                    </div>
-            `;
-
-            if (deptClasses.length > 0) {
-                html += `<div class="tree-children">`;
-                
-                deptClasses.forEach((cls, clsIndex) => {
-                    const classStudents = students.filter(s => s.classId === cls.classId);
-                    
-                    html += `
-                        <div class="tree-child-group">
-                            <div class="tree-node layer-2">
-                                <div class="tree-node-title">📚 ${cls.className}</div>
-                                <div class="tree-node-id">${cls.classId}</div>
-                                <div class="tree-node-info">
-                                    ${cls.departmentId} | ${classStudents.length} Students
-                                </div>
-                            </div>
-                    `;
-
-                    if (classStudents.length > 0) {
-                        html += `<div class="tree-children">`;
-                        
-                        // Limit to first 3 students per class for readability
-                        const displayStudents = classStudents.slice(0, 3);
-                        displayStudents.forEach((student, stuIndex) => {
-                            html += `
-                                <div class="tree-child-group">
-                                    <div class="tree-node layer-3">
-                                        <div class="tree-node-title">👤 ${student.studentName}</div>
-                                        <div class="tree-node-id">${student.studentId}</div>
-                                        <div class="tree-node-info">
-                                            ${student.rollNumber}
-                                        </div>
-                                    </div>
-                                </div>
-                            `;
-                        });
-                        
-                        if (classStudents.length > 3) {
-                            html += `
-                                <div class="tree-child-group">
-                                    <div class="tree-node layer-3" style="background: #f5f5f5; border-color: #999;">
-                                        <div class="tree-node-title">...</div>
-                                        <div class="tree-node-info">
-                                            +${classStudents.length - 3} more students
-                                        </div>
-                                    </div>
-                                </div>
-                            `;
-                        }
-                        
-                        html += `</div>`; // Close tree-children for students
-                    }
-
-                    html += `</div>`; // Close tree-child-group for class
-                });
-                
-                html += `</div>`; // Close tree-children for classes
-            }
-
-            html += `</div>`; // Close tree-branch for department
-        });
-
+function displayBlockchain(data, type) {
+    const viewer = document.getElementById('blockchain-viewer');
+    
+    // Get the correct entity object based on type
+    const entity = data.department || data.class || data.student;
+    
+    // Get the chain array
+    const chain = entity.chain || [];
+    
+    let html = '<div class="blockchain-viewer">';
+    html += `<h3 style="margin-bottom: 20px; color: #4a5568;">Blockchain for: <span style="color: #667eea;">${entity.name || 'Unknown'}</span></h3>`;
+    
+    // Show entity details
+    if (type === 'student' && data.student) {
         html += `
+            <div style="margin-bottom: 25px; padding: 15px; background: #ebf8ff; border-left: 4px solid #4299e1; border-radius: 4px;">
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
+                    <div><strong>Student:</strong> ${data.student.name}</div>
+                    <div><strong>Roll:</strong> ${data.student.rollNumber}</div>
+                    <div><strong>Class ID:</strong> ${data.student.classId}</div>
+                    <div><strong>Dept ID:</strong> ${data.student.departmentId}</div>
+                    <div><strong>Total Present:</strong> ${data.student.metadata?.totalPresent || 0}</div>
                 </div>
             </div>
         `;
-
-        container.innerHTML = html;
-        showMessage('blockchain-message', 'Tree visualization generated successfully', 'success');
-
-    } catch (error) {
-        container.innerHTML = '<p style="text-align: center; color: red;">Error generating tree visualization</p>';
-        showMessage('blockchain-message', 'Error: ' + error.message, 'error');
     }
+    
+    html += '<div class="chain-container" style="display: flex; flex-direction: column; gap: 20px; position: relative;">';
+    
+    if (chain.length === 0) {
+        html += '<div class="no-data">No blocks found in this chain</div>';
+    } else {
+        chain.forEach((block, index) => {
+            const isGenesis = index === 0;
+            const shortHash = block.hash.substring(0, 15) + '...';
+            const shortPrevHash = block.prev_hash.substring(0, 15) + '...';
+            
+            html += `
+                <div class="block-card" style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); position: relative; z-index: 2;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 15px; border-bottom: 1px solid #edf2f7; padding-bottom: 10px;">
+                        <div>
+                            <span style="background: ${isGenesis ? '#48bb78' : '#667eea'}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.75em; font-weight: bold; text-transform: uppercase;">
+                                ${isGenesis ? 'Genesis Block' : 'Block #' + block.index}
+                            </span>
+                            <div style="font-size: 0.8em; color: #a0aec0; margin-top: 5px;">
+                                ${new Date(block.timestamp).toLocaleString()}
+                            </div>
+                        </div>
+                        <div style="text-align: right; font-family: monospace; font-size: 0.85em; color: #718096;">
+                            <div>Hash: <span style="color: #2d3748; font-weight: bold;">${shortHash}</span></div>
+                            <div style="font-size: 0.9em;">Prev: ${shortPrevHash}</div>
+                            <div style="font-size: 0.9em;">Nonce: ${block.nonce}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="block-data">
+                        <h4 style="font-size: 0.9em; text-transform: uppercase; color: #a0aec0; margin-bottom: 8px;">Transactions</h4>
+                        <div style="background: #f7fafc; padding: 10px; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 0.9em; overflow-x: auto;">
+                            ${renderBlockData(block.transactions)}
+                        </div>
+                    </div>
+                </div>
+                
+                ${index < chain.length - 1 ? `
+                    <div style="height: 30px; width: 2px; background: #cbd5e0; margin: 0 auto; position: relative; z-index: 1;"></div>
+                    <div style="width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 8px solid #cbd5e0; margin: -5px auto 0;"></div>
+                ` : ''}
+            `;
+        });
+    }
+    
+    html += '</div></div>';
+    
+    viewer.innerHTML = html;
 }
 
-// ==================== VALIDATION ====================
+function renderBlockData(data) {
+    if (!data) return 'No data';
+    
+    // Format common transaction fields
+    let formattedHtml = '';
+    
+    if (data.type) {
+        let typeColor = '#4299e1'; // Default blue
+        if (data.type.includes('created')) typeColor = '#48bb78'; // Green
+        else if (data.type.includes('deleted')) typeColor = '#f56565'; // Red
+        else if (data.type === 'attendance') typeColor = '#ed8936'; // Orange
+        
+        formattedHtml += `<div style="color: ${typeColor}; font-weight: bold; margin-bottom: 5px;">Type: ${data.type}</div>`;
+    }
+    
+    if (data.action) formattedHtml += `<div>Action: ${data.action}</div>`;
+    if (data.status) formattedHtml += `<div>Status: <strong>${data.status}</strong></div>`;
+    
+    // Attendance specific
+    if (data.type === 'attendance') {
+        formattedHtml += `<div style="margin-top: 5px; padding-top: 5px; border-top: 1px dashed #cbd5e0;">`;
+        formattedHtml += `<div>Date: ${data.date}</div>`;
+        formattedHtml += `<div>Marked By: ${data.markedBy || 'Unknown'}</div>`;
+        formattedHtml += `</div>`;
+    }
+    
+    // Exclude redundant fields for cleaner display
+    const exclude = ['type', 'action', 'status', 'timestamp', 'studentId', 'studentName', 'rollNumber', 'classId', 'departmentId'];
+    
+    const otherKeys = Object.keys(data).filter(k => !exclude.includes(k));
+    
+    if (otherKeys.length > 0) {
+        formattedHtml += `<div style="margin-top: 5px; font-size: 0.85em; color: #718096;">`;
+        otherKeys.forEach(key => {
+            if (typeof data[key] === 'object') {
+                formattedHtml += `<div>${key}: ${JSON.stringify(data[key]).substring(0, 50)}${JSON.stringify(data[key]).length > 50 ? '...' : ''}</div>`;
+            } else {
+                formattedHtml += `<div>${key}: ${data[key]}</div>`;
+            }
+        });
+        formattedHtml += `</div>`;
+    }
+    
+    return formattedHtml || JSON.stringify(data, null, 2);
+}
+
+// =============================================
+// VALIDATION
+// =============================================
 
 async function validateBlockchain() {
-    const container = document.getElementById('validation-result');
-    container.innerHTML = '<div class="loading">Validating blockchain hierarchy...</div>';
-
+    const resultEl = document.getElementById('validation-result');
+    resultEl.innerHTML = '<div class="loading">Validating blockchain...</div>';
+    
     try {
-        const response = await fetch(`${API_BASE}/system/validate`);
+        const response = await fetch('/api/system/validate');
         const data = await response.json();
         
         if (data.success) {
-            const validation = data.validation;
-            let html = `
-                <div class="validation-result ${validation.isValid ? 'valid' : 'invalid'}">
-                    <h3>Validation Result: <span style="color: ${validation.isValid ? 'green' : 'red'}">${validation.isValid ? 'VALID ✓' : 'INVALID ✗'}</span></h3>
+            const isValid = data.data.valid;
+            resultEl.innerHTML = `
+                <div class="validation-result ${isValid ? 'valid' : 'invalid'}">
+                    <h3>${isValid ? '✅ Blockchain Valid' : '❌ Blockchain Invalid'}</h3>
+                    <p>${data.data.message || (isValid ? 'All chains are properly linked and verified.' : 'Validation failed.')}</p>
+                </div>
             `;
-            
-            // Department validation
-            html += '<h4>Department Chains:</h4><ul>';
-            for (const [id, isValid] of Object.entries(validation.departments)) {
-                html += `<li>${id}: <span style="color: ${isValid ? 'green' : 'red'}">${isValid ? 'Valid' : 'Invalid'}</span></li>`;
-            }
-            html += '</ul>';
-            
-            // Class validation
-            html += '<h4>Class Chains:</h4><ul>';
-            for (const [id, isValid] of Object.entries(validation.classes)) {
-                html += `<li>${id}: <span style="color: ${isValid ? 'green' : 'red'}">${isValid ? 'Valid' : 'Invalid'}</span></li>`;
-            }
-            html += '</ul>';
-            
-            // Student validation
-            html += '<h4>Student Chains:</h4><ul>';
-            const studentEntries = Object.entries(validation.students);
-            if (studentEntries.length > 10) {
-                // Show first 10 only if too many
-                for (let i = 0; i < 10; i++) {
-                    const [id, isValid] = studentEntries[i];
-                    html += `<li>${id}: <span style="color: ${isValid ? 'green' : 'red'}">${isValid ? 'Valid' : 'Invalid'}</span></li>`;
-                }
-                html += `<li>... and ${studentEntries.length - 10} more students</li>`;
-            } else {
-                for (const [id, isValid] of studentEntries) {
-                    html += `<li>${id}: <span style="color: ${isValid ? 'green' : 'red'}">${isValid ? 'Valid' : 'Invalid'}</span></li>`;
-                }
-            }
-            html += '</ul>';
-            
-            // Errors
-            if (validation.errors.length > 0) {
-                html += '<h4>Errors:</h4><ul style="color: red;">';
-                validation.errors.forEach(error => {
-                    html += `<li>${error}</li>`;
-                });
-                html += '</ul>';
-            }
-            
-            html += '</div>';
-            container.innerHTML = html;
-            
-            showMessage('validation-message', 'Validation complete', validation.isValid ? 'success' : 'error');
+        } else {
+            resultEl.innerHTML = `<p style="color: red;">${data.message}</p>`;
         }
     } catch (error) {
-        container.innerHTML = '<p style="text-align: center; color: red;">Error during validation</p>';
-        showMessage('validation-message', 'Error: ' + error.message, 'error');
+        resultEl.innerHTML = '<p style="color: red;">Error validating blockchain</p>';
     }
 }
 
-// Initialize on page load
-document.addEventListener('DOMContentLoaded', () => {
-    loadStats();
-});
+// =============================================
+// TREE VISUALIZATION (placeholder)
+// =============================================
+
+async function loadTreeVisualization() {
+    const container = document.getElementById('tree-visualization');
+    if (!container) return;
+    
+    container.innerHTML = '<div class="loading">Loading tree...</div>';
+    
+    // This would load the full tree visualization
+    // For now, just show a placeholder
+    container.innerHTML = '<p style="text-align: center; color: #666;">Tree visualization available in blockchain tab</p>';
+}

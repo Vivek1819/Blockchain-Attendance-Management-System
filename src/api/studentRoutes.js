@@ -1,29 +1,47 @@
 const express = require('express');
-const router = express.Router();
+const { requireAuth } = require('../middleware/clerkAuth');
+const userRoles = require('../auth/userRoles');
 
-/**
- * Student Routes
- */
-module.exports = (blockchainManager) => {
-    
-    // Create a new student
-    router.post('/', (req, res) => {
+module.exports = function(blockchainManager) {
+    const router = express.Router();
+
+    // Create student - Teacher can only create in their department
+    router.post('/', requireAuth, (req, res) => {
         try {
-            const { studentId, studentName, rollNumber, classId, departmentId, additionalData } = req.body;
-            
-            if (!studentId || !studentName || !rollNumber || !classId || !departmentId) {
-                return res.status(400).json({
+            const userId = req.auth.userId;
+            const userRole = userRoles.getUserRole(userId);
+            const { studentId, studentName, rollNumber, classId, departmentId } = req.body;
+
+            if (!userRole) {
+                return res.status(403).json({
                     success: false,
-                    message: 'studentId, studentName, rollNumber, classId, and departmentId are required'
+                    message: 'Please complete onboarding first'
                 });
             }
 
-            const result = blockchainManager.createStudent(
-                studentId, studentName, rollNumber, classId, departmentId, additionalData || {}
-            );
+            // Check department access
+            if (userRole.role !== 'admin' && userRole.departmentId !== departmentId) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'You can only create students in your own department'
+                });
+            }
+
+            if (!studentId || !studentName || !rollNumber || !classId || !departmentId) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Student ID, name, roll number, class ID, and department ID are required'
+                });
+            }
+
+            const result = blockchainManager.createStudent(studentId, studentName, rollNumber, classId, departmentId, req.body);
             blockchainManager.saveToFile();
             
-            res.status(201).json(result);
+            res.status(201).json({
+                success: true,
+                message: 'Student created successfully',
+                data: result
+            });
         } catch (error) {
             res.status(400).json({
                 success: false,
@@ -32,14 +50,17 @@ module.exports = (blockchainManager) => {
         }
     });
 
-    // Get all students
+    // Get all students - Public
     router.get('/', (req, res) => {
         try {
             const students = blockchainManager.getAllStudents();
             res.json({
                 success: true,
-                count: students.length,
-                students
+                data: students.map(student => ({
+                    ...student,
+                    id: student.studentId,
+                    name: student.studentName
+                }))
             });
         } catch (error) {
             res.status(500).json({
@@ -49,30 +70,39 @@ module.exports = (blockchainManager) => {
         }
     });
 
-    // Get student by ID
+    // Get student by ID - Public
     router.get('/:studentId', (req, res) => {
         try {
             const student = blockchainManager.getStudent(req.params.studentId);
+            if (!student) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Student not found'
+                });
+            }
             res.json({
                 success: true,
-                student
+                data: student
             });
         } catch (error) {
-            res.status(404).json({
+            res.status(500).json({
                 success: false,
                 message: error.message
             });
         }
     });
 
-    // Get students by class
+    // Get students by class - Public
     router.get('/class/:classId', (req, res) => {
         try {
             const students = blockchainManager.getStudentsByClass(req.params.classId);
             res.json({
                 success: true,
-                count: students.length,
-                students
+                data: students.map(student => ({
+                    ...student,
+                    id: student.studentId,
+                    name: student.studentName
+                }))
             });
         } catch (error) {
             res.status(500).json({
@@ -82,14 +112,17 @@ module.exports = (blockchainManager) => {
         }
     });
 
-    // Get students by department
+    // Get students by department - Public
     router.get('/department/:departmentId', (req, res) => {
         try {
             const students = blockchainManager.getStudentsByDepartment(req.params.departmentId);
             res.json({
                 success: true,
-                count: students.length,
-                students
+                data: students.map(student => ({
+                    ...student,
+                    id: student.studentId,
+                    name: student.studentName
+                }))
             });
         } catch (error) {
             res.status(500).json({
@@ -99,67 +132,13 @@ module.exports = (blockchainManager) => {
         }
     });
 
-    // Update student
-    router.put('/:studentId', (req, res) => {
+    // Update student - Teacher can only update in their department
+    router.put('/:studentId', requireAuth, (req, res) => {
         try {
-            const { updatedData } = req.body;
-            
-            if (!updatedData) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'updatedData is required'
-                });
-            }
+            const userId = req.auth.userId;
+            const userRole = userRoles.getUserRole(userId);
+            const student = blockchainManager.getStudent(req.params.studentId);
 
-            const result = blockchainManager.updateStudent(req.params.studentId, updatedData);
-            blockchainManager.saveToFile();
-            
-            res.json(result);
-        } catch (error) {
-            res.status(400).json({
-                success: false,
-                message: error.message
-            });
-        }
-    });
-
-    // Delete student (mark as deleted)
-    router.delete('/:studentId', (req, res) => {
-        try {
-            const { reason } = req.body;
-            const result = blockchainManager.deleteStudent(req.params.studentId, reason || '');
-            blockchainManager.saveToFile();
-            
-            res.json(result);
-        } catch (error) {
-            res.status(400).json({
-                success: false,
-                message: error.message
-            });
-        }
-    });
-
-    // Search students
-    router.get('/search/:searchTerm', (req, res) => {
-        try {
-            const results = blockchainManager.searchStudents(req.params.searchTerm);
-            res.json({
-                success: true,
-                count: results.length,
-                results
-            });
-        } catch (error) {
-            res.status(500).json({
-                success: false,
-                message: error.message
-            });
-        }
-    });
-
-    // Get student blockchain details
-    router.get('/:studentId/blockchain', (req, res) => {
-        try {
-            const student = blockchainManager.students.get(req.params.studentId);
             if (!student) {
                 return res.status(404).json({
                     success: false,
@@ -167,18 +146,100 @@ module.exports = (blockchainManager) => {
                 });
             }
 
+            // Check department access
+            if (userRole.role !== 'admin' && userRole.departmentId !== student.departmentId) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'You can only update students in your own department'
+                });
+            }
+
+            const result = blockchainManager.updateStudent(req.params.studentId, req.body);
+            blockchainManager.saveToFile();
+            
             res.json({
                 success: true,
-                blockchain: {
-                    studentId: student.studentId,
-                    name: student.name,
-                    rollNumber: student.rollNumber,
-                    classId: student.classId,
-                    departmentId: student.departmentId,
-                    chainLength: student.getChainLength(),
-                    isValid: student.isChainValid(),
-                    parentClassHash: student.parentClassHash,
-                    blocks: student.getAllBlocks()
+                message: 'Student updated successfully',
+                data: result
+            });
+        } catch (error) {
+            res.status(400).json({
+                success: false,
+                message: error.message
+            });
+        }
+    });
+
+    // Delete student - Teacher can only delete in their department
+    router.delete('/:studentId', requireAuth, (req, res) => {
+        try {
+            const userId = req.auth.userId;
+            const userRole = userRoles.getUserRole(userId);
+            const student = blockchainManager.getStudent(req.params.studentId);
+
+            if (!student) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Student not found'
+                });
+            }
+
+            // Check department access
+            if (userRole.role !== 'admin' && userRole.departmentId !== student.departmentId) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'You can only delete students in your own department'
+                });
+            }
+
+            const result = blockchainManager.deleteStudent(req.params.studentId, req.body.reason);
+            blockchainManager.saveToFile();
+            
+            res.json({
+                success: true,
+                message: 'Student deleted successfully',
+                data: result
+            });
+        } catch (error) {
+            res.status(400).json({
+                success: false,
+                message: error.message
+            });
+        }
+    });
+
+    // Search students - Public
+    router.get('/search/:searchTerm', (req, res) => {
+        try {
+            const results = blockchainManager.searchStudents(req.params.searchTerm);
+            res.json({
+                success: true,
+                data: results.map(student => ({
+                    ...student,
+                    id: student.studentId,
+                    name: student.studentName
+                }))
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    });
+
+    // Get student blockchain - Public
+    router.get('/:studentId/blockchain', (req, res) => {
+        try {
+            const blockchain = blockchainManager.getStudentBlockchain(req.params.studentId);
+            res.json({
+                success: true,
+                data: {
+                    student: {
+                        ...blockchain,
+                        id: blockchain.studentId,
+                        name: blockchain.name
+                    }
                 }
             });
         } catch (error) {
@@ -189,20 +250,13 @@ module.exports = (blockchainManager) => {
         }
     });
 
-    // Get student attendance summary
+    // Get student attendance summary - Public
     router.get('/:studentId/attendance/summary', (req, res) => {
         try {
-            const student = blockchainManager.students.get(req.params.studentId);
-            if (!student) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'Student not found'
-                });
-            }
-
+            const attendance = blockchainManager.getStudentAttendance(req.params.studentId);
             res.json({
                 success: true,
-                summary: student.getAttendanceSummary()
+                data: attendance
             });
         } catch (error) {
             res.status(500).json({

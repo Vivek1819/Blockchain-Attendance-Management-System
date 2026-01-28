@@ -1,27 +1,38 @@
 const express = require('express');
-const router = express.Router();
+const { requireAuth } = require('../middleware/clerkAuth');
+const userRoles = require('../auth/userRoles');
 
-/**
- * Department Routes
- */
-module.exports = (blockchainManager) => {
-    
-    // Create a new department
-    router.post('/', (req, res) => {
+module.exports = function(blockchainManager) {
+    const router = express.Router();
+
+    // Create department - Admin only
+    router.post('/', requireAuth, (req, res) => {
         try {
-            const { departmentId, departmentName, additionalData } = req.body;
+            const userId = req.auth.userId;
+            
+            // Check if user is admin
+            if (!userRoles.isAdmin(userId)) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Only administrators can create departments'
+                });
+            }
+
+            const { departmentId, departmentName } = req.body;
             
             if (!departmentId || !departmentName) {
                 return res.status(400).json({
                     success: false,
-                    message: 'departmentId and departmentName are required'
+                    message: 'Department ID and name are required'
                 });
             }
 
-            const result = blockchainManager.createDepartment(departmentId, departmentName, additionalData || {});
-            blockchainManager.saveToFile();
-            
-            res.status(201).json(result);
+            const result = blockchainManager.createDepartment(departmentId, departmentName, req.body);
+            res.status(201).json({
+                success: true,
+                message: 'Department created successfully',
+                data: result
+            });
         } catch (error) {
             res.status(400).json({
                 success: false,
@@ -30,14 +41,17 @@ module.exports = (blockchainManager) => {
         }
     });
 
-    // Get all departments
+    // Get all departments - Public (for blockchain integrity)
     router.get('/', (req, res) => {
         try {
             const departments = blockchainManager.getAllDepartments();
             res.json({
                 success: true,
-                count: departments.length,
-                departments
+                data: departments.map(dept => ({
+                    ...dept,
+                    id: dept.departmentId,
+                    name: dept.departmentName
+                }))
             });
         } catch (error) {
             res.status(500).json({
@@ -47,98 +61,108 @@ module.exports = (blockchainManager) => {
         }
     });
 
-    // Get department by ID
+    // Get department by ID - Public
     router.get('/:departmentId', (req, res) => {
         try {
             const department = blockchainManager.getDepartment(req.params.departmentId);
-            res.json({
-                success: true,
-                department
-            });
-        } catch (error) {
-            res.status(404).json({
-                success: false,
-                message: error.message
-            });
-        }
-    });
-
-    // Update department
-    router.put('/:departmentId', (req, res) => {
-        try {
-            const { updatedData } = req.body;
-            
-            if (!updatedData) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'updatedData is required'
-                });
-            }
-
-            const result = blockchainManager.updateDepartment(req.params.departmentId, updatedData);
-            blockchainManager.saveToFile();
-            
-            res.json(result);
-        } catch (error) {
-            res.status(400).json({
-                success: false,
-                message: error.message
-            });
-        }
-    });
-
-    // Delete department (mark as deleted)
-    router.delete('/:departmentId', (req, res) => {
-        try {
-            const { reason } = req.body;
-            const result = blockchainManager.deleteDepartment(req.params.departmentId, reason || '');
-            blockchainManager.saveToFile();
-            
-            res.json(result);
-        } catch (error) {
-            res.status(400).json({
-                success: false,
-                message: error.message
-            });
-        }
-    });
-
-    // Search departments
-    router.get('/search/:searchTerm', (req, res) => {
-        try {
-            const results = blockchainManager.searchDepartments(req.params.searchTerm);
-            res.json({
-                success: true,
-                count: results.length,
-                results
-            });
-        } catch (error) {
-            res.status(500).json({
-                success: false,
-                message: error.message
-            });
-        }
-    });
-
-    // Get department blockchain details
-    router.get('/:departmentId/blockchain', (req, res) => {
-        try {
-            const dept = blockchainManager.departments.get(req.params.departmentId);
-            if (!dept) {
+            if (!department) {
                 return res.status(404).json({
                     success: false,
                     message: 'Department not found'
                 });
             }
-
             res.json({
                 success: true,
-                blockchain: {
-                    departmentId: dept.departmentId,
-                    name: dept.name,
-                    chainLength: dept.getChainLength(),
-                    isValid: dept.isChainValid(),
-                    blocks: dept.getAllBlocks()
+                data: department
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    });
+
+    // Update department - Admin only
+    router.put('/:departmentId', requireAuth, (req, res) => {
+        try {
+            const userId = req.auth.userId;
+            
+            if (!userRoles.isAdmin(userId)) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Only administrators can update departments'
+                });
+            }
+
+            const result = blockchainManager.updateDepartment(req.params.departmentId, req.body);
+            res.json({
+                success: true,
+                message: 'Department updated successfully',
+                data: result
+            });
+        } catch (error) {
+            res.status(400).json({
+                success: false,
+                message: error.message
+            });
+        }
+    });
+
+    // Delete department - Admin only
+    router.delete('/:departmentId', requireAuth, (req, res) => {
+        try {
+            const userId = req.auth.userId;
+            
+            if (!userRoles.isAdmin(userId)) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Only administrators can delete departments'
+                });
+            }
+
+            const result = blockchainManager.deleteDepartment(req.params.departmentId, req.body.reason);
+            res.json({
+                success: true,
+                message: 'Department deleted successfully',
+                data: result
+            });
+        } catch (error) {
+            res.status(400).json({
+                success: false,
+                message: error.message
+            });
+        }
+    });
+
+    // Search departments - Public
+    router.get('/search/:searchTerm', (req, res) => {
+        try {
+            const results = blockchainManager.searchDepartments(req.params.searchTerm);
+            res.json({
+                success: true,
+                data: results
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    });
+
+    // Get department blockchain - Public (for integrity verification)
+    router.get('/:departmentId/blockchain', (req, res) => {
+        try {
+            const blockchain = blockchainManager.getDepartmentBlockchain(req.params.departmentId);
+            res.json({
+                success: true,
+                data: {
+                    department: {
+                        ...blockchain,
+                        id: blockchain.departmentId,
+                        name: blockchain.name
+                    }
                 }
             });
         } catch (error) {

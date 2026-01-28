@@ -1,4 +1,5 @@
 const express = require('express');
+require('dotenv').config();
 const cors = require('cors');
 const path = require('path');
 const BlockchainManager = require('./src/blockchain/BlockchainManager');
@@ -29,6 +30,7 @@ app.use('/api/classes', require('./src/api/classRoutes')(blockchainManager));
 app.use('/api/students', require('./src/api/studentRoutes')(blockchainManager));
 app.use('/api/attendance', require('./src/api/attendanceRoutes')(blockchainManager));
 app.use('/api/system', require('./src/api/systemRoutes')(blockchainManager));
+app.use('/api/auth', require('./src/api/authRoutes')(blockchainManager));
 
 // Root route
 app.get('/', (req, res) => {

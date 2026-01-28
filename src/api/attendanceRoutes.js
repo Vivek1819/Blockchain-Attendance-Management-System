@@ -1,27 +1,63 @@
 const express = require('express');
-const router = express.Router();
+const { requireAuth } = require('../middleware/clerkAuth');
+const userRoles = require('../auth/userRoles');
 
-/**
- * Attendance Routes
- */
-module.exports = (blockchainManager) => {
-    
-    // Mark attendance for a single student
-    router.post('/mark', (req, res) => {
+module.exports = function(blockchainManager) {
+    const router = express.Router();
+
+    // Mark attendance - Teacher can only mark for their department
+    router.post('/mark', requireAuth, (req, res) => {
         try {
-            const { studentId, status, date, markedBy } = req.body;
-            
-            if (!studentId || !status || !date) {
-                return res.status(400).json({
+            const userId = req.auth.userId;
+            const userRole = userRoles.getUserRole(userId);
+            const { studentId, status, date } = req.body;
+
+            if (!userRole) {
+                return res.status(403).json({
                     success: false,
-                    message: 'studentId, status (Present/Absent/Leave), and date are required'
+                    message: 'Please complete onboarding first'
                 });
             }
 
-            const result = blockchainManager.markAttendance(studentId, status, date, markedBy || 'admin');
+            // Get student to check department
+            const student = blockchainManager.getStudent(studentId);
+            if (!student) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Student not found'
+                });
+            }
+
+            // Check department access (admin can mark for any, teacher only for their dept)
+            if (userRole.role !== 'admin' && userRole.departmentId !== student.departmentId) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'You can only mark attendance for students in your department'
+                });
+            }
+
+            if (!studentId || !status) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Student ID and status are required'
+                });
+            }
+
+            // Use teacher's name as "markedBy" - this goes into the blockchain!
+            const markedBy = userRole.name || 'Unknown Teacher';
+            const attendanceDate = date || new Date().toISOString().split('T')[0];
+
+            const result = blockchainManager.markAttendance(studentId, status, attendanceDate, markedBy);
             blockchainManager.saveToFile();
             
-            res.status(201).json(result);
+            res.status(201).json({
+                success: true,
+                message: 'Attendance marked successfully',
+                data: {
+                    ...result,
+                    markedBy: markedBy
+                }
+            });
         } catch (error) {
             res.status(400).json({
                 success: false,
@@ -30,47 +66,72 @@ module.exports = (blockchainManager) => {
         }
     });
 
-    // Mark attendance for multiple students (bulk)
-    router.post('/mark/bulk', (req, res) => {
+    // Bulk mark attendance - Teacher can only mark for their department
+    router.post('/mark/bulk', requireAuth, (req, res) => {
         try {
-            const { attendanceRecords, date, markedBy } = req.body;
-            
-            if (!attendanceRecords || !Array.isArray(attendanceRecords) || !date) {
-                return res.status(400).json({
+            const userId = req.auth.userId;
+            const userRole = userRoles.getUserRole(userId);
+            const { attendanceRecords, date } = req.body;
+
+            if (!userRole) {
+                return res.status(403).json({
                     success: false,
-                    message: 'attendanceRecords (array) and date are required'
+                    message: 'Please complete onboarding first'
                 });
             }
 
+            if (!Array.isArray(attendanceRecords) || attendanceRecords.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Attendance records array is required'
+                });
+            }
+
+            const markedBy = userRole.name || 'Unknown Teacher';
+            const attendanceDate = date || new Date().toISOString().split('T')[0];
             const results = [];
             const errors = [];
 
             for (const record of attendanceRecords) {
                 try {
+                    const student = blockchainManager.getStudent(record.studentId);
+                    
+                    if (!student) {
+                        errors.push({ studentId: record.studentId, error: 'Student not found' });
+                        continue;
+                    }
+
+                    // Check department access for each student
+                    if (userRole.role !== 'admin' && userRole.departmentId !== student.departmentId) {
+                        errors.push({ 
+                            studentId: record.studentId, 
+                            error: 'Not authorized for this student\'s department' 
+                        });
+                        continue;
+                    }
+
                     const result = blockchainManager.markAttendance(
                         record.studentId, 
                         record.status, 
-                        date, 
-                        markedBy || 'admin'
+                        attendanceDate, 
+                        markedBy
                     );
-                    results.push(result);
+                    results.push({ ...result, markedBy });
                 } catch (error) {
-                    errors.push({
-                        studentId: record.studentId,
-                        error: error.message
-                    });
+                    errors.push({ studentId: record.studentId, error: error.message });
                 }
             }
 
             blockchainManager.saveToFile();
-            
-            res.status(201).json({
+
+            res.json({
                 success: true,
-                message: 'Bulk attendance marking completed',
-                successCount: results.length,
-                errorCount: errors.length,
-                results,
-                errors
+                message: `Marked ${results.length} attendance records`,
+                data: {
+                    successful: results,
+                    failed: errors,
+                    markedBy: markedBy
+                }
             });
         } catch (error) {
             res.status(400).json({
@@ -80,32 +141,32 @@ module.exports = (blockchainManager) => {
         }
     });
 
-    // Get attendance history for a student
+    // Get student attendance - Public (for blockchain transparency)
     router.get('/student/:studentId', (req, res) => {
         try {
             const attendance = blockchainManager.getStudentAttendance(req.params.studentId);
             res.json({
                 success: true,
-                attendance
+                data: attendance
             });
         } catch (error) {
-            res.status(404).json({
+            res.status(500).json({
                 success: false,
                 message: error.message
             });
         }
     });
 
-    // Get attendance for a class on a specific date
+    // Get class attendance for a date - Public
     router.get('/class/:classId/date/:date', (req, res) => {
         try {
-            const attendance = blockchainManager.getClassAttendance(req.params.classId, req.params.date);
+            const attendance = blockchainManager.getClassAttendance(
+                req.params.classId, 
+                req.params.date
+            );
             res.json({
                 success: true,
-                classId: req.params.classId,
-                date: req.params.date,
-                count: attendance.length,
-                attendance
+                data: attendance
             });
         } catch (error) {
             res.status(500).json({
@@ -115,16 +176,16 @@ module.exports = (blockchainManager) => {
         }
     });
 
-    // Get attendance for a department on a specific date
+    // Get department attendance for a date - Public
     router.get('/department/:departmentId/date/:date', (req, res) => {
         try {
-            const attendance = blockchainManager.getDepartmentAttendance(req.params.departmentId, req.params.date);
+            const attendance = blockchainManager.getDepartmentAttendance(
+                req.params.departmentId, 
+                req.params.date
+            );
             res.json({
                 success: true,
-                departmentId: req.params.departmentId,
-                date: req.params.date,
-                count: attendance.length,
-                attendance
+                data: attendance
             });
         } catch (error) {
             res.status(500).json({
@@ -134,17 +195,14 @@ module.exports = (blockchainManager) => {
         }
     });
 
-    // Get today's attendance for a class
+    // Get today's attendance for a class - Public
     router.get('/class/:classId/today', (req, res) => {
         try {
             const today = new Date().toISOString().split('T')[0];
             const attendance = blockchainManager.getClassAttendance(req.params.classId, today);
             res.json({
                 success: true,
-                classId: req.params.classId,
-                date: today,
-                count: attendance.length,
-                attendance
+                data: attendance
             });
         } catch (error) {
             res.status(500).json({
@@ -154,17 +212,14 @@ module.exports = (blockchainManager) => {
         }
     });
 
-    // Get today's attendance for a department
+    // Get today's attendance for a department - Public
     router.get('/department/:departmentId/today', (req, res) => {
         try {
             const today = new Date().toISOString().split('T')[0];
             const attendance = blockchainManager.getDepartmentAttendance(req.params.departmentId, today);
             res.json({
                 success: true,
-                departmentId: req.params.departmentId,
-                date: today,
-                count: attendance.length,
-                attendance
+                data: attendance
             });
         } catch (error) {
             res.status(500).json({
