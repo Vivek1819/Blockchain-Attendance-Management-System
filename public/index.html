@@ -435,54 +435,85 @@
             border-top: 1px solid rgba(0, 0, 0, 0.1);
         }
 
+        /* Improved Tree CSS */
         .tree-line-v {
-            width: 3px;
-            height: 40px;
-            background: #999;
-            margin: 0 auto;
+            display: none;
         }
 
-        .tree-line-h {
-            position: absolute;
-            height: 3px;
-            background: #999;
-            top: -40px;
-        }
+        /* Deprecated */
 
         .tree-children {
             display: flex;
-            gap: 40px;
-            margin-top: 40px;
+            padding-top: 20px;
             position: relative;
+            transition: all 0.5s;
+            justify-content: center;
         }
 
         .tree-children::before {
             content: '';
             position: absolute;
-            top: -40px;
+            top: 0;
             left: 50%;
-            width: 3px;
-            height: 40px;
-            background: #999;
-            transform: translateX(-50%);
+            border-left: 2px solid #ccc;
+            width: 0;
+            height: 20px;
         }
 
         .tree-child-group {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
+            float: left;
+            text-align: center;
+            list-style-type: none;
             position: relative;
+            padding: 20px 10px 0 10px;
+            transition: all 0.5s;
         }
 
-        .tree-child-group::before {
+        /* Connecting lines */
+        .tree-child-group::before,
+        .tree-child-group::after {
             content: '';
             position: absolute;
-            top: -40px;
+            top: 0;
+            right: 50%;
+            border-top: 2px solid #ccc;
+            width: 50%;
+            height: 20px;
+        }
+
+        .tree-child-group::after {
+            right: auto;
             left: 50%;
-            width: 3px;
-            height: 40px;
-            background: #999;
-            transform: translateX(-50%);
+            border-left: 2px solid #ccc;
+        }
+
+        /* Remove left connector from first child and right connector from last child */
+        .tree-child-group:first-child::before {
+            border: 0 none;
+        }
+
+        .tree-child-group:last-child::after {
+            border: 0 none;
+        }
+
+        /* Adding vertical connector back to the last nodes */
+        .tree-child-group:last-child::before {
+            border-right: 2px solid #ccc;
+            border-radius: 0 5px 0 0;
+        }
+
+        .tree-child-group:first-child::after {
+            border-radius: 5px 0 0 0;
+        }
+
+        /* Fix for single child */
+        .tree-child-group:only-child::after,
+        .tree-child-group:only-child::before {
+            display: none;
+        }
+
+        .tree-child-group:only-child {
+            padding-top: 0;
         }
 
         .tree-stats {

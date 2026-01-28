@@ -68,6 +68,9 @@ async function initializeClerk() {
     }
 }
 
+
+let currentUserDetails = null;
+
 async function updateAuthUI() {
     const authContainer = document.getElementById('auth-container');
     
@@ -78,6 +81,7 @@ async function updateAuthUI() {
         
         // Check if user has completed onboarding
         const userInfo = await fetchUserInfo();
+        currentUserDetails = userInfo;
         
         if (userInfo && !userInfo.onboarded) {
             // Show onboarding modal
@@ -100,10 +104,16 @@ async function updateAuthUI() {
         // Show protected tabs
         updateProtectedTabs(true, userInfo);
         
+        // Apply teacher-specific UI constraints
+        if (userInfo && userInfo.role === 'teacher') {
+            applyTeacherConstraints(userInfo);
+        }
+        
     } else {
         // User is signed out
         currentUser = null;
         authToken = null;
+        currentUserDetails = null;
         
         authContainer.innerHTML = `
             <button onclick="signIn()" class="btn" style="background: white; color: #667eea; padding: 10px 20px; font-weight: bold;">
@@ -114,6 +124,30 @@ async function updateAuthUI() {
         // Hide protected tabs (but keep Blockchain visible)
         updateProtectedTabs(false, null);
     }
+}
+
+function applyTeacherConstraints(userInfo) {
+    if (!userInfo || !userInfo.departmentId) return;
+    
+    // Auto-fill and hide department dropdowns
+    const deptDropdowns = ['class-dept', 'student-dept'];
+    
+    deptDropdowns.forEach(id => {
+        const dropdown = document.getElementById(id);
+        if (dropdown) {
+            // Set value (even if options aren't loaded yet, we'll try)
+            // Note: We might need to ensure options are loaded first, or force the value
+            // We'll also hide the parent form group
+            const formGroup = dropdown.closest('.form-group');
+            if (formGroup) {
+                formGroup.style.display = 'none';
+            }
+        }
+    });
+
+    // We also need to ensure that when we try to create a class or student, the value is set
+    // Since dropdown options might load later, we should intercept the create functions or ensure 
+    // updateDepartmentDropdowns respects this
 }
 
 async function fetchUserInfo() {
@@ -234,11 +268,18 @@ function updateProtectedTabs(isAuthenticated, userInfo) {
                 tab.style.opacity = '1';
                 tab.style.pointerEvents = 'auto';
                 
-                // Special handling for departments tab - only admin can see create form
-                if (tabId === 'departments' && userInfo && userInfo.role !== 'admin') {
-                    const createForm = content.querySelector('div[style*="margin-bottom: 30px"]');
-                    if (createForm && createForm.querySelector('h3')?.textContent === 'Create Department') {
-                        createForm.style.display = 'none';
+                // Hide departments tab completely for teachers
+                if (tabId === 'departments' && userInfo && userInfo.role === 'teacher') {
+                    tab.style.display = 'none';
+                } else if (tabId === 'departments') {
+                    tab.style.display = 'block'; // Ensure it's shown for others
+                    
+                    // Only admin can see create form
+                    if (userInfo && userInfo.role !== 'admin') {
+                        const createForm = content.querySelector('div[style*="margin-bottom: 30px"]');
+                        if (createForm && createForm.querySelector('h3')?.textContent === 'Create Department') {
+                            createForm.style.display = 'none';
+                        }
                     }
                 }
             }
@@ -404,12 +445,50 @@ function updateDepartmentDropdowns() {
     dropdowns.forEach(id => {
         const dropdown = document.getElementById(id);
         if (dropdown) {
-            const currentValue = dropdown.value;
-            dropdown.innerHTML = '<option value="">-- Select Department --</option>';
-            allDepartments.forEach(dept => {
-                dropdown.innerHTML += `<option value="${dept.id}">${dept.name} (${dept.id})</option>`;
-            });
-            dropdown.value = currentValue;
+            // Check if user is a teacher
+            if (currentUserDetails && currentUserDetails.role === 'teacher') {
+                // Teacher: Only show their department
+                const deptId = currentUserDetails.departmentId;
+                const deptName = currentUserDetails.departmentName || 'My Department';
+                
+                // Only update if not already set (prevents loop)
+                if (dropdown.value !== deptId) {
+                    dropdown.innerHTML = `<option value="${deptId}" selected>${deptName} (${deptId})</option>`;
+                    dropdown.value = deptId;
+                    
+                    // Trigger change event
+                    dropdown.dispatchEvent(new Event('change'));
+                    
+                    // Explicitly load classes if this is the student department dropdown
+                    if (id === 'student-dept') {
+                        loadClassesForDept();
+                    }
+                }
+                
+                // Hide the dropdown container
+                const formGroup = dropdown.closest('.form-group');
+                if (formGroup) {
+                    formGroup.style.display = 'none';
+                }
+            } else {
+                // Admin/Other: Show all departments
+                const currentValue = dropdown.value;
+                let newHtml = '<option value="">-- Select Department --</option>';
+                allDepartments.forEach(dept => {
+                    newHtml += `<option value="${dept.id}">${dept.name} (${dept.id})</option>`;
+                });
+                
+                if (dropdown.innerHTML !== newHtml) {
+                    dropdown.innerHTML = newHtml;
+                    dropdown.value = currentValue;
+                }
+                
+                // Ensure visible
+                const formGroup = dropdown.closest('.form-group');
+                if (formGroup) {
+                    formGroup.style.display = 'block';
+                }
+            }
         }
     });
 }
@@ -547,7 +626,12 @@ let allClasses = [];
 
 async function loadClasses() {
     try {
-        const response = await fetch('/api/classes');
+        let url = '/api/classes';
+        if (currentUserDetails && currentUserDetails.role === 'teacher') {
+            url = `/api/classes/department/${currentUserDetails.departmentId}`;
+        }
+        
+        const response = await fetch(url);
         const data = await response.json();
         
         if (data.success) {
@@ -566,11 +650,16 @@ function updateClassDropdowns() {
         const dropdown = document.getElementById(id);
         if (dropdown) {
             const currentValue = dropdown.value;
-            dropdown.innerHTML = '<option value="">-- Select Class --</option>';
+            let newHtml = '<option value="">-- Select Class --</option>';
             allClasses.forEach(cls => {
-                dropdown.innerHTML += `<option value="${cls.id}">${cls.name} (${cls.departmentId})</option>`;
+                newHtml += `<option value="${cls.id}">${cls.name} (${cls.departmentId})</option>`;
             });
-            dropdown.value = currentValue;
+            
+            // Only update DOM if content changed to prevent flickering
+            if (dropdown.innerHTML !== newHtml) {
+                dropdown.innerHTML = newHtml;
+                dropdown.value = currentValue;
+            }
         }
     });
 }
@@ -580,7 +669,12 @@ async function loadClassesList() {
     listEl.innerHTML = '<div class="loading">Loading classes...</div>';
     
     try {
-        const response = await fetch('/api/classes');
+        let url = '/api/classes';
+        if (currentUserDetails && currentUserDetails.role === 'teacher') {
+            url = `/api/classes/department/${currentUserDetails.departmentId}`;
+        }
+        
+        const response = await fetch(url);
         const data = await response.json();
         
         if (data.success && data.data.length > 0) {
@@ -698,7 +792,12 @@ async function loadClassesForDept() {
     const deptId = document.getElementById('student-dept').value;
     const classDropdown = document.getElementById('student-class');
     
-    classDropdown.innerHTML = '<option value="">-- Select Class --</option>';
+    // Safety check
+    if (!classDropdown) return;
+    
+    // Store current value to restore if still valid
+    const currentValue = classDropdown.value;
+    let newHtml = '<option value="">-- Select Class --</option>';
     
     if (deptId) {
         try {
@@ -707,11 +806,20 @@ async function loadClassesForDept() {
             
             if (data.success && data.data.length > 0) {
                 data.data.forEach(cls => {
-                    classDropdown.innerHTML += `<option value="${cls.id}">${cls.name}</option>`;
+                    newHtml += `<option value="${cls.id}">${cls.name}</option>`;
                 });
             }
         } catch (error) {
             console.error('Failed to load classes for department:', error);
+        }
+    }
+    
+    // Only update DOM if content changed
+    if (classDropdown.innerHTML !== newHtml) {
+        classDropdown.innerHTML = newHtml;
+        // Restore value if it exists in new options
+        if (currentValue && newHtml.includes(`value="${currentValue}"`)) {
+            classDropdown.value = currentValue;
         }
     }
 }
@@ -732,7 +840,12 @@ let allStudents = [];
 
 async function loadStudents() {
     try {
-        const response = await fetch('/api/students');
+        let url = '/api/students';
+        if (currentUserDetails && currentUserDetails.role === 'teacher') {
+            url = `/api/students/department/${currentUserDetails.departmentId}`;
+        }
+        
+        const response = await fetch(url);
         const data = await response.json();
         
         if (data.success) {
@@ -748,11 +861,15 @@ function updateStudentDropdowns() {
     const dropdown = document.getElementById('student-update-select');
     if (dropdown) {
         const currentValue = dropdown.value;
-        dropdown.innerHTML = '<option value="">-- Select Student --</option>';
+        let newHtml = '<option value="">-- Select Student --</option>';
         allStudents.forEach(student => {
-            dropdown.innerHTML += `<option value="${student.id}">${student.name} (${student.rollNumber})</option>`;
+            newHtml += `<option value="${student.id}">${student.name} (${student.rollNumber})</option>`;
         });
-        dropdown.value = currentValue;
+        
+        if (dropdown.innerHTML !== newHtml) {
+            dropdown.innerHTML = newHtml;
+            dropdown.value = currentValue;
+        }
     }
 }
 
@@ -761,7 +878,12 @@ async function loadStudentsList() {
     listEl.innerHTML = '<div class="loading">Loading students...</div>';
     
     try {
-        const response = await fetch('/api/students');
+        let url = '/api/students';
+        if (currentUserDetails && currentUserDetails.role === 'teacher') {
+            url = `/api/students/department/${currentUserDetails.departmentId}`;
+        }
+        
+        const response = await fetch(url);
         const data = await response.json();
         
         if (data.success && data.data.length > 0) {
@@ -1183,11 +1305,15 @@ async function validateBlockchain() {
         const data = await response.json();
         
         if (data.success) {
-            const isValid = data.data.valid;
+            const isValid = data.validation.isValid;
+            const errorMsg = data.validation.errors && data.validation.errors.length > 0 
+                ? data.validation.errors.join('<br>') 
+                : 'Validation failed.';
+                
             resultEl.innerHTML = `
                 <div class="validation-result ${isValid ? 'valid' : 'invalid'}">
                     <h3>${isValid ? '✅ Blockchain Valid' : '❌ Blockchain Invalid'}</h3>
-                    <p>${data.data.message || (isValid ? 'All chains are properly linked and verified.' : 'Validation failed.')}</p>
+                    <p>${isValid ? 'All chains are properly linked and verified.' : errorMsg}</p>
                 </div>
             `;
         } else {
@@ -1202,13 +1328,127 @@ async function validateBlockchain() {
 // TREE VISUALIZATION (placeholder)
 // =============================================
 
-async function loadTreeVisualization() {
-    const container = document.getElementById('tree-visualization');
+async function visualizeBlockchainTree() {
+    const container = document.getElementById('blockchain-tree');
     if (!container) return;
     
-    container.innerHTML = '<div class="loading">Loading tree...</div>';
+    container.innerHTML = '<div class="loading">Generating complete blockchain tree...</div>';
     
-    // This would load the full tree visualization
-    // For now, just show a placeholder
-    container.innerHTML = '<p style="text-align: center; color: #666;">Tree visualization available in blockchain tab</p>';
+    try {
+        // Ensure we have all data
+        if (allDepartments.length === 0) await loadDepartments();
+        if (allClasses.length === 0) await loadClasses();
+        if (allStudents.length === 0) await loadStudents();
+        
+        // Build hierarchy
+        const tree = allDepartments.map(dept => {
+            const deptClasses = allClasses.filter(c => c.departmentId === dept.id);
+            return {
+                ...dept,
+                classes: deptClasses.map(cls => {
+                    const classStudents = allStudents.filter(s => s.classId === cls.id);
+                    return {
+                        ...cls,
+                        students: classStudents
+                    };
+                })
+            };
+        });
+        
+        // Generate HTML
+        let html = `
+            <div class="tree-stats">
+                <div class="tree-stat-item">
+                    <div class="tree-stat-number">${allDepartments.length}</div>
+                    <div class="tree-stat-label">Departments</div>
+                </div>
+                <div class="tree-stat-item">
+                    <div class="tree-stat-number">${allClasses.length}</div>
+                    <div class="tree-stat-label">Classes</div>
+                </div>
+                <div class="tree-stat-item">
+                    <div class="tree-stat-number">${allStudents.length}</div>
+                    <div class="tree-stat-label">Students</div>
+                </div>
+            </div>
+            
+            <div class="legend">
+                <div class="legend-item">
+                    <div class="legend-color layer-1"></div>
+                    <span>Department Chain</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color layer-2"></div>
+                    <span>Class Chain</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color layer-3"></div>
+                    <span>Student Chain</span>
+                </div>
+            </div>
+            
+            <div class="tree-container">
+                <div class="tree-diagram">
+        `;
+        
+        if (tree.length === 0) {
+            html += '<p style="text-align: center; color: #666; padding: 20px;">No blockchain data available to visualize.</p>';
+        } else {
+            // Level 1: Departments
+            html += '<div class="tree-level">';
+            
+            tree.forEach(dept => {
+                html += `
+                    <div class="tree-branch">
+                        <div class="tree-node layer-1" onclick="viewDepartmentBlockchain('${dept.id}')" style="cursor: pointer;">
+                            <div class="tree-node-title">${dept.name}</div>
+                            <div class="tree-node-id">${dept.id}</div>
+                            <div class="tree-node-info">${dept.classes.length} Classes</div>
+                        </div>
+                        
+                        ${dept.classes.length > 0 ? `
+                            <div class="tree-children">
+                                ${dept.classes.map(cls => `
+                                    <div class="tree-child-group">
+                                        <div class="tree-node layer-2" onclick="viewClassBlockchain('${cls.id}')" style="cursor: pointer;">
+                                            <div class="tree-node-title">${cls.name}</div>
+                                            <div class="tree-node-id">${cls.id}</div>
+                                            <div class="tree-node-info">${cls.students.length} Students</div>
+                                        </div>
+                                        
+                                        ${cls.students.length > 0 ? `
+                                            <div class="tree-children">
+                                                ${cls.students.map(student => `
+                                                    <div class="tree-child-group">
+                                                        <div class="tree-node layer-3" onclick="viewStudentBlockchain('${student.id}')" style="cursor: pointer;">
+                                                            <div class="tree-node-title">${student.name}</div>
+                                                            <div class="tree-node-id">${student.rollNumber}</div>
+                                                            <div class="tree-node-info">ID: ${student.id}</div>
+                                                        </div>
+                                                    </div>
+                                                `).join('')}
+                                            </div>
+                                        ` : ''}
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            });
+            
+            html += '</div>'; // End tree-level
+        }
+        
+        html += `
+                </div>
+            </div>
+        `;
+        
+        container.innerHTML = html;
+        
+    } catch (error) {
+        console.error('Tree generation error:', error);
+        container.innerHTML = '<p style="color: red; text-align: center;">Error generating tree view. Please try reloading data.</p>';
+    }
 }
