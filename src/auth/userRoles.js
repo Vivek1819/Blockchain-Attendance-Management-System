@@ -81,12 +81,112 @@ function hasCompletedOnboarding(userId) {
     return userRole !== null;
 }
 
+/**
+ * Get all teachers
+ */
+function getAllTeachers() {
+    const roles = loadRoles();
+    const teachers = [];
+    
+    for (const [userId, userData] of Object.entries(roles)) {
+        if (userData.role === 'teacher') {
+            teachers.push({
+                userId,
+                ...userData
+            });
+        }
+    }
+    
+    return teachers;
+}
+
+/**
+ * Assign classes to a teacher
+ */
+function assignClasses(teacherId, classIds) {
+    const roles = loadRoles();
+    
+    if (!roles[teacherId]) {
+        return false;
+    }
+    
+    roles[teacherId].assignedClasses = classIds;
+    return saveRoles(roles);
+}
+
+/**
+ * Check if teacher has access to a specific class
+ */
+function hasClassAccess(userId, classId) {
+    const userRole = getUserRole(userId);
+    if (!userRole) return false;
+    
+    // Admins have access to all classes
+    if (userRole.role === 'admin') return true;
+    
+    // Teachers need the class in their assignedClasses
+    if (userRole.role === 'teacher') {
+        const assignedClasses = userRole.assignedClasses || [];
+        return assignedClasses.includes(classId);
+    }
+    
+    return false;
+}
+
+/**
+ * Get the teacher who owns a specific class (if any)
+ * Returns { teacherId, teacherName } or null
+ */
+function getClassOwner(classId) {
+    const roles = loadRoles();
+    
+    for (const [userId, userData] of Object.entries(roles)) {
+        if (userData.role === 'teacher' && userData.assignedClasses) {
+            if (userData.assignedClasses.includes(classId)) {
+                return {
+                    teacherId: userId,
+                    teacherName: userData.name || 'Unknown'
+                };
+            }
+        }
+    }
+    
+    return null;
+}
+
+/**
+ * Get all class->teacher assignments
+ * Returns { classId: { teacherId, teacherName } }
+ */
+function getClassAssignments() {
+    const roles = loadRoles();
+    const assignments = {};
+    
+    for (const [userId, userData] of Object.entries(roles)) {
+        if (userData.role === 'teacher' && userData.assignedClasses) {
+            userData.assignedClasses.forEach(classId => {
+                assignments[classId] = {
+                    teacherId: userId,
+                    teacherName: userData.name || 'Unknown'
+                };
+            });
+        }
+    }
+    
+    return assignments;
+}
+
 module.exports = {
     getUserRole,
     assignRole,
     isAdmin,
     isTeacherForDepartment,
     hasCompletedOnboarding,
+    getAllTeachers,
+    assignClasses,
+    hasClassAccess,
+    getClassOwner,
+    getClassAssignments,
     loadRoles,
     saveRoles
 };

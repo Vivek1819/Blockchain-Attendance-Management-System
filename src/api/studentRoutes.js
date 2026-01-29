@@ -89,6 +89,48 @@ module.exports = function(blockchainManager) {
         }
     });
 
+    // Bulk enroll students in class
+    router.post('/enroll-bulk', requireAuth, (req, res) => {
+        try {
+            const userId = req.auth.userId;
+            const { studentIds, classId } = req.body;
+
+            if (!studentIds || !Array.isArray(studentIds) || !classId) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Student IDs array and Class ID are required'
+                });
+            }
+
+            const results = {
+                successful: [],
+                failed: []
+            };
+
+            for (const studentId of studentIds) {
+                try {
+                    blockchainManager.enrollStudentInClass(studentId, classId);
+                    results.successful.push(studentId);
+                } catch (error) {
+                    results.failed.push({ studentId, error: error.message });
+                }
+            }
+            
+            blockchainManager.saveToFile();
+
+            res.json({
+                success: true,
+                message: `Enrolled ${results.successful.length} students`,
+                data: results
+            });
+        } catch (error) {
+            res.status(400).json({
+                success: false,
+                message: error.message
+            });
+        }
+    });
+
     // Get all students - Public
     router.get('/', (req, res) => {
         try {
@@ -162,6 +204,46 @@ module.exports = function(blockchainManager) {
                     id: student.studentId,
                     name: student.studentName
                 }))
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    });
+
+    // Get students by assigned classes - For teachers with assigned classes
+    router.post('/by-classes', requireAuth, (req, res) => {
+        try {
+            const { classIds } = req.body;
+            
+            if (!Array.isArray(classIds)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'classIds array is required'
+                });
+            }
+
+            // Get all students enrolled in any of the specified classes
+            const studentSet = new Map();
+            
+            for (const classId of classIds) {
+                const students = blockchainManager.getStudentsByClass(classId);
+                for (const student of students) {
+                    if (!studentSet.has(student.studentId)) {
+                        studentSet.set(student.studentId, {
+                            ...student,
+                            id: student.studentId,
+                            name: student.studentName
+                        });
+                    }
+                }
+            }
+
+            res.json({
+                success: true,
+                data: Array.from(studentSet.values())
             });
         } catch (error) {
             res.status(500).json({

@@ -109,6 +109,13 @@ async function updateAuthUI() {
             applyTeacherConstraints(userInfo);
         }
         
+        // Show admin-only UI sections
+        if (userInfo && userInfo.role === 'admin') {
+            showAdminUI();
+        } else {
+            hideAdminUI();
+        }
+        
     } else {
         // User is signed out
         currentUser = null;
@@ -382,6 +389,7 @@ function showTab(tabId) {
     if (tabId === 'departments') loadDepartmentsList();
     if (tabId === 'classes') loadClassesList();
     if (tabId === 'students') loadStudentsList();
+    if (tabId === 'admin') loadClassAssignmentTable();
 }
 
 // =============================================
@@ -664,16 +672,23 @@ let allClasses = [];
 
 async function loadClasses() {
     try {
-        let url = '/api/classes';
-        if (currentUserDetails && currentUserDetails.role === 'teacher') {
-            url = `/api/classes/department/${currentUserDetails.departmentId}`;
-        }
-        
-        const response = await fetch(url);
+        const response = await fetch('/api/classes');
         const data = await response.json();
         
         if (data.success) {
-            allClasses = data.data || [];
+            let classes = data.data || [];
+            
+            // For teachers, filter by assigned classes
+            if (currentUserDetails && currentUserDetails.role === 'teacher') {
+                const assignedClasses = currentUserDetails.assignedClasses || [];
+                if (assignedClasses.length > 0) {
+                    classes = classes.filter(cls => assignedClasses.includes(cls.id) || assignedClasses.includes(cls.classId));
+                } else {
+                    classes = []; // No assigned classes means no access
+                }
+            }
+            
+            allClasses = classes;
             updateClassDropdowns();
         }
     } catch (error) {
@@ -707,33 +722,81 @@ async function loadClassesList() {
     listEl.innerHTML = '<div class="loading">Loading classes...</div>';
     
     try {
-        let url = '/api/classes';
-        if (currentUserDetails && currentUserDetails.role === 'teacher') {
-            url = `/api/classes/department/${currentUserDetails.departmentId}`;
-        }
-        
-        const response = await fetch(url);
+        const response = await fetch('/api/classes');
         const data = await response.json();
         
-        if (data.success && data.data.length > 0) {
-            let html = '<table><thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Status</th><th>Actions</th></tr></thead><tbody>';
+        if (data.success) {
+            let classes = data.data || [];
             
-            data.data.forEach(cls => {
-                html += `
-                    <tr>
-                        <td>${cls.id}</td>
-                        <td>${cls.name}</td>
-                        <td>${cls.departmentId}</td>
-                        <td>${cls.status || 'active'}</td>
-                        <td>
-                            <button class="btn btn-primary" onclick="viewClassBlockchain('${cls.id}')" style="padding: 5px 10px; font-size: 0.85em;">View Chain</button>
-                        </td>
-                    </tr>
-                `;
-            });
+            // For teachers, filter by assigned classes
+            if (currentUserDetails && currentUserDetails.role === 'teacher') {
+                const assignedClasses = currentUserDetails.assignedClasses || [];
+                if (assignedClasses.length > 0) {
+                    classes = classes.filter(cls => assignedClasses.includes(cls.id) || assignedClasses.includes(cls.classId));
+                } else {
+                    classes = [];
+                }
+            }
             
-            html += '</tbody></table>';
-            listEl.innerHTML = html;
+            if (classes.length > 0) {
+                // Fetch teachers to build assignment map
+                let classOwnerMap = {};
+                try {
+                    const teachersRes = await authenticatedFetch('/api/auth/teachers');
+                    const teachersData = await teachersRes.json();
+                    if (teachersData.success) {
+                        teachersList = teachersData.data;
+                        teachersData.data.forEach(teacher => {
+                            if (teacher.assignedClasses) {
+                                teacher.assignedClasses.forEach(classId => {
+                                    classOwnerMap[classId] = teacher.name || 'Unknown';
+                                });
+                            }
+                        });
+                    }
+                } catch (e) { /* Teachers API may fail for non-admin */ }
+                
+                const isAdmin = currentUserDetails && currentUserDetails.role === 'admin';
+                
+                let html = '<table><thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Teacher</th><th>Actions</th></tr></thead><tbody>';
+                
+                classes.forEach(cls => {
+                    const assignedTeacher = classOwnerMap[cls.id] || classOwnerMap[cls.classId];
+                    const isMyClass = currentUserDetails.role === 'teacher' && assignedTeacher === currentUserDetails.name;
+                    const canManage = isAdmin || isMyClass;
+                    
+                    html += `
+                        <tr>
+                            <td>${cls.id}</td>
+                            <td>${cls.name}</td>
+                            <td>${cls.departmentId}</td>
+                            <td>
+                                ${assignedTeacher 
+                                    ? `<span style="background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 4px 12px; border-radius: 15px; font-size: 0.85em;">${assignedTeacher}</span>`
+                                    : '<span style="color: #aaa; font-style: italic;">Unassigned</span>'}
+                            </td>
+                            <td>
+                                <button class="btn btn-primary" onclick="viewClassBlockchain('${cls.id}')" style="padding: 5px 10px; font-size: 0.85em;">View Chain</button>
+                                
+                                ${canManage 
+                                    ? `<button class="btn btn-success" onclick="openEnrollStudentsModal('${cls.id}', '${cls.name}', '${cls.departmentId}')" style="padding: 5px 10px; font-size: 0.85em; margin-left: 5px; background: linear-gradient(135deg, #11998e, #38ef7d); border: none;">Enroll Students</button>`
+                                    : ''}
+
+                                ${isAdmin 
+                                    ? (assignedTeacher 
+                                        ? `<button class="btn btn-warning" onclick="openAssignTeacherModal('${cls.id}', '${cls.name}')" style="padding: 5px 10px; font-size: 0.85em; margin-left: 5px;">Change Teacher</button>`
+                                        : `<button class="btn btn-success" onclick="openAssignTeacherModal('${cls.id}', '${cls.name}')" style="padding: 5px 10px; font-size: 0.85em; margin-left: 5px;">Assign Teacher</button>`)
+                                    : ''}
+                            </td>
+                        </tr>
+                    `;
+                });
+                
+                html += '</tbody></table>';
+                listEl.innerHTML = html;
+            } else {
+                listEl.innerHTML = '<p style="text-align: center; color: #666;">No classes assigned. Contact admin to get classes assigned.</p>';
+            }
         } else {
             listEl.innerHTML = '<p style="text-align: center; color: #666;">No classes found</p>';
         }
@@ -916,20 +979,30 @@ async function loadStudentsList() {
     listEl.innerHTML = '<div class="loading">Loading students...</div>';
     
     try {
-        // Determine URL based on role
-        let studentsUrl = '/api/students';
-        if (currentUserDetails && currentUserDetails.role === 'teacher' && currentUserDetails.departmentId) {
-            studentsUrl = `/api/students/department/${currentUserDetails.departmentId}`;
+        let studentsData;
+        
+        // For teachers, get students from their assigned classes
+        if (currentUserDetails && currentUserDetails.role === 'teacher') {
+            const assignedClasses = currentUserDetails.assignedClasses || [];
+            if (assignedClasses.length === 0) {
+                listEl.innerHTML = '<p style="text-align: center; color: #666;">No classes assigned. Contact admin to get classes assigned.</p>';
+                return;
+            }
+            
+            const response = await authenticatedFetch('/api/students/by-classes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ classIds: assignedClasses })
+            });
+            studentsData = await response.json();
+        } else {
+            // Admin sees all students
+            const response = await fetch('/api/students');
+            studentsData = await response.json();
         }
 
-        // Fetch students (filtered if teacher) and classes (for mapping)
-        const [studentsRes, classesRes] = await Promise.all([
-            fetch(studentsUrl),
-            fetch('/api/classes')
-        ]);
-
-        
-        const data = await studentsRes.json();
+        // Fetch classes for mapping
+        const classesRes = await fetch('/api/classes');
         const classesData = await classesRes.json();
         
         const classMap = {};
@@ -937,13 +1010,13 @@ async function loadStudentsList() {
             classesData.data.forEach(c => classMap[c.id] = c.name);
         }
         
-        if (data.success && data.data.length > 0) {
+        if (studentsData.success && studentsData.data.length > 0) {
             // Update global variable for other functions to use
-            allStudents = data.data;
+            allStudents = studentsData.data;
             
             let html = '<table><thead><tr><th>ID</th><th>Name</th><th>Roll No</th><th>Class</th><th>Department</th><th>Actions</th></tr></thead><tbody>';
             
-            data.data.forEach(student => {
+            studentsData.data.forEach(student => {
                 const isUnassigned = !student.enrolledClasses || student.enrolledClasses.length === 0;
                 let classDisplay = isUnassigned 
                     ? '<span style="color:#d69e2e; font-weight:bold;">⚠️ Unassigned</span>' 
@@ -967,9 +1040,10 @@ async function loadStudentsList() {
             html += '</tbody></table>';
             listEl.innerHTML = html;
         } else {
-            listEl.innerHTML = '<p style="text-align: center; color: #666;">No students found</p>';
+            listEl.innerHTML = '<p style="text-align: center; color: #666;">No students found in your assigned classes</p>';
         }
     } catch (error) {
+        console.error('Error loading students:', error);
         listEl.innerHTML = '<p style="color: red;">Error loading students</p>';
     }
 }
@@ -1641,5 +1715,521 @@ async function confirmAssignClass() {
     } catch (error) {
         console.error('Error enrolling student:', error);
         alert('Error enrolling student');
+    }
+}
+
+// =============================================
+// ADMIN: CLASS ASSIGNMENT TO TEACHERS
+// =============================================
+
+let teachersList = [];
+
+function showAdminUI() {
+    const adminTab = document.getElementById('admin-tab');
+    if (adminTab) {
+        adminTab.style.display = 'inline-block';
+    }
+}
+
+function hideAdminUI() {
+    const adminTab = document.getElementById('admin-tab');
+    if (adminTab) {
+        adminTab.style.display = 'none';
+    }
+}
+
+// Modal state
+let currentAssignClassId = null;
+
+async function openAssignTeacherModal(classId, className) {
+    currentAssignClassId = classId;
+    
+    // Update modal header
+    document.getElementById('assign-teacher-class-name').textContent = `Class: ${className} (${classId})`;
+    
+    // Fetch teachers
+    const listDiv = document.getElementById('teacher-selection-list');
+    listDiv.innerHTML = '<div style="text-align: center; padding: 20px; color: #888;">Loading teachers...</div>';
+    
+    // Show modal
+    document.getElementById('assign-teacher-modal').style.display = 'block';
+    
+    try {
+        const response = await authenticatedFetch('/api/auth/teachers');
+        const data = await response.json();
+        
+        if (data.success && data.data.length > 0) {
+            teachersList = data.data;
+            
+            // Find current owner
+            let currentOwner = null;
+            data.data.forEach(t => {
+                if (t.assignedClasses && t.assignedClasses.includes(classId)) {
+                    currentOwner = t.userId;
+                }
+            });
+            
+            let html = '';
+            data.data.forEach(teacher => {
+                const isSelected = teacher.userId === currentOwner;
+                html += `
+                    <div onclick="selectTeacherForClass('${teacher.userId}')" 
+                         style="display: flex; align-items: center; gap: 12px; padding: 12px 15px; 
+                                border-radius: 10px; cursor: pointer; margin-bottom: 8px;
+                                background: ${isSelected ? 'linear-gradient(135deg, #667eea, #764ba2)' : '#f8f9fa'};
+                                color: ${isSelected ? 'white' : '#333'};
+                                transition: all 0.2s;">
+                        <div style="width: 40px; height: 40px; background: ${isSelected ? 'rgba(255,255,255,0.2)' : 'linear-gradient(135deg, #667eea, #764ba2)'}; 
+                                    border-radius: 50%; display: flex; align-items: center; justify-content: center; 
+                                    color: white; font-weight: 600; font-size: 1em;">
+                            ${teacher.name ? teacher.name.charAt(0).toUpperCase() : '?'}
+                        </div>
+                        <div style="flex: 1;">
+                            <div style="font-weight: 600;">${teacher.name || 'Unknown'}</div>
+                            <div style="font-size: 0.85em; opacity: 0.7;">${teacher.departmentName || 'No Department'}</div>
+                        </div>
+                        ${isSelected ? '<span style="font-size: 0.8em; opacity: 0.9;">Current ✓</span>' : ''}
+                    </div>
+                `;
+            });
+            
+            // Add unassign option if currently assigned
+            if (currentOwner) {
+                html += `
+                    <div onclick="unassignClassFromModal()" 
+                         style="display: flex; align-items: center; gap: 12px; padding: 12px 15px; 
+                                border-radius: 10px; cursor: pointer; margin-top: 15px;
+                                background: #fff5f5; border: 1px dashed #ff6b6b; color: #ff6b6b;">
+                        <div style="width: 40px; height: 40px; background: #ff6b6b; border-radius: 50%; 
+                                    display: flex; align-items: center; justify-content: center; color: white;">✕</div>
+                        <div><strong>Remove Assignment</strong></div>
+                    </div>
+                `;
+            }
+            
+            listDiv.innerHTML = html;
+        } else {
+            listDiv.innerHTML = '<div style="text-align: center; padding: 40px; color: #888;">No teachers found. Teachers need to complete onboarding first.</div>';
+        }
+    } catch (error) {
+        listDiv.innerHTML = '<div style="text-align: center; padding: 20px; color: red;">Error loading teachers</div>';
+    }
+}
+
+function closeAssignTeacherModal() {
+    document.getElementById('assign-teacher-modal').style.display = 'none';
+    currentAssignClassId = null;
+}
+
+async function selectTeacherForClass(teacherId) {
+    if (!currentAssignClassId) return;
+    
+    try {
+        // Get teacher's current classes and add this one
+        const teacher = teachersList.find(t => t.userId === teacherId);
+        const currentClasses = teacher?.assignedClasses || [];
+        
+        // Remove this class from any other teacher first
+        for (const t of teachersList) {
+            if (t.assignedClasses && t.assignedClasses.includes(currentAssignClassId) && t.userId !== teacherId) {
+                const filtered = t.assignedClasses.filter(c => c !== currentAssignClassId);
+                await authenticatedFetch('/api/auth/assign-classes', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ teacherId: t.userId, classIds: filtered })
+                });
+            }
+        }
+        
+        // Assign to new teacher (if not already assigned)
+        if (!currentClasses.includes(currentAssignClassId)) {
+            const newClasses = [...currentClasses, currentAssignClassId];
+            await authenticatedFetch('/api/auth/assign-classes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ teacherId, classIds: newClasses })
+            });
+        }
+        
+        closeAssignTeacherModal();
+        showMessage('class-message', `Teacher assigned successfully!`, 'success');
+        loadClassesList(); // Refresh
+    } catch (error) {
+        showMessage('class-message', 'Error assigning teacher: ' + error.message, 'error');
+    }
+}
+
+async function unassignClassFromModal() {
+    if (!currentAssignClassId) return;
+    
+    try {
+        // Find owner and remove
+        for (const t of teachersList) {
+            if (t.assignedClasses && t.assignedClasses.includes(currentAssignClassId)) {
+                const filtered = t.assignedClasses.filter(c => c !== currentAssignClassId);
+                await authenticatedFetch('/api/auth/assign-classes', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ teacherId: t.userId, classIds: filtered })
+                });
+                break;
+            }
+        }
+        
+        closeAssignTeacherModal();
+        showMessage('class-message', 'Teacher unassigned successfully!', 'success');
+        loadClassesList();
+    } catch (error) {
+        showMessage('class-message', 'Error: ' + error.message, 'error');
+    }
+}
+
+async function loadClassAssignmentTable() {
+    const tableDiv = document.getElementById('class-assignment-table');
+    tableDiv.innerHTML = '<div style="padding: 40px; text-align: center; color: #888;">Loading...</div>';
+    
+    try {
+        // Fetch classes and teachers
+        const [classesRes, teachersRes] = await Promise.all([
+            fetch('/api/classes'),
+            authenticatedFetch('/api/auth/teachers')
+        ]);
+        
+        const classesData = await classesRes.json();
+        const teachersData = await teachersRes.json();
+        
+        if (!classesData.success || !teachersData.success) {
+            tableDiv.innerHTML = '<p style="color: red; padding: 20px;">Error loading data</p>';
+            return;
+        }
+        
+        teachersList = teachersData.data;
+        
+        // Build class-to-teacher map
+        const classOwnerMap = {};
+        let assignedCount = 0;
+        teachersList.forEach(teacher => {
+            if (teacher.assignedClasses) {
+                teacher.assignedClasses.forEach(classId => {
+                    classOwnerMap[classId] = {
+                        teacherId: teacher.userId,
+                        teacherName: teacher.name || 'Unknown'
+                    };
+                    assignedCount++;
+                });
+            }
+        });
+        
+        // Update assignment count badge
+        const countEl = document.getElementById('assignment-count');
+        if (countEl) countEl.textContent = assignedCount;
+        
+        // Build teacher dropdown options
+        const teacherOptions = teachersList.map(t => 
+            `<option value="${t.userId}">${t.name}</option>`
+        ).join('');
+        
+        // Render premium table
+        let html = `
+            <table style="width: 100%; border-collapse: collapse;">
+                <thead>
+                    <tr style="background: linear-gradient(135deg, #f8f9ff 0%, #f0f4ff 100%);">
+                        <th style="padding: 15px 20px; text-align: left; font-weight: 600; color: #444; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px;">Class</th>
+                        <th style="padding: 15px 20px; text-align: left; font-weight: 600; color: #444; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px;">Department</th>
+                        <th style="padding: 15px 20px; text-align: left; font-weight: 600; color: #444; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px;">Assigned To</th>
+                        <th style="padding: 15px 20px; text-align: center; font-weight: 600; color: #444; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+        `;
+        
+        classesData.data.forEach((cls, index) => {
+            const owner = classOwnerMap[cls.classId];
+            const isEven = index % 2 === 0;
+            
+            html += `
+                <tr style="background: ${isEven ? '#fff' : '#fafbff'}; border-bottom: 1px solid #eef2f7; transition: all 0.2s;">
+                    <td style="padding: 18px 20px;">
+                        <div style="font-weight: 600; color: #333; margin-bottom: 3px;">${cls.className}</div>
+                        <div style="font-size: 0.8em; color: #888; font-family: monospace;">${cls.classId}</div>
+                    </td>
+                    <td style="padding: 18px 20px;">
+                        <span style="background: #e8f4fd; color: #1976d2; padding: 5px 12px; border-radius: 6px; font-size: 0.85em; font-weight: 500;">${cls.departmentId}</span>
+                    </td>
+                    <td style="padding: 18px 20px;">
+                        ${owner 
+                            ? `<div style="display: flex; align-items: center; gap: 10px;">
+                                <div style="width: 32px; height: 32px; background: linear-gradient(135deg, #667eea, #764ba2); border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: 600; font-size: 0.85em;">${owner.teacherName.charAt(0).toUpperCase()}</div>
+                                <span style="font-weight: 500; color: #333;">${owner.teacherName}</span>
+                               </div>` 
+                            : '<span style="color: #aaa; font-style: italic;">Unassigned</span>'}
+                    </td>
+                    <td style="padding: 18px 20px; text-align: center;">
+                        ${owner 
+                            ? `<button onclick="unassignClass('${cls.classId}')" style="background: linear-gradient(135deg, #ff6b6b, #ee5a5a); border: none; color: white; padding: 8px 18px; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.85em; box-shadow: 0 2px 8px rgba(238,90,90,0.3); transition: all 0.2s;">Remove</button>`
+                            : `<div style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+                                <select id="assign-${cls.classId}" style="padding: 8px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 0.9em; min-width: 140px; background: white;">
+                                    <option value="">Select teacher...</option>
+                                    ${teacherOptions}
+                                </select>
+                                <button onclick="assignClassToTeacher('${cls.classId}')" style="background: linear-gradient(135deg, #667eea, #764ba2); border: none; color: white; padding: 8px 18px; border-radius: 8px; cursor: pointer; font-weight: 500; font-size: 0.85em; box-shadow: 0 2px 8px rgba(102,126,234,0.3); transition: all 0.2s;">Assign</button>
+                               </div>`
+                        }
+                    </td>
+                </tr>
+            `;
+        });
+        
+        html += '</tbody></table>';
+        
+        if (classesData.data.length === 0) {
+            html = '<div style="padding: 60px; text-align: center; color: #888;">No classes available. Create classes first.</div>';
+        }
+        
+        tableDiv.innerHTML = html;
+        
+    } catch (error) {
+        console.error('Error loading class assignment table:', error);
+        tableDiv.innerHTML = '<p style="color: red; padding: 20px;">Error loading data</p>';
+    }
+}
+
+async function assignClassToTeacher(classId) {
+    const selectEl = document.getElementById(`assign-${classId}`);
+    const teacherId = selectEl.value;
+    
+    if (!teacherId) {
+        showMessage('assign-message', 'Please select a teacher first', 'error');
+        return;
+    }
+    
+    try {
+        // Get current teacher's assigned classes and add this one
+        const teacher = teachersList.find(t => t.userId === teacherId);
+        const currentClasses = teacher?.assignedClasses || [];
+        const newClasses = [...currentClasses, classId];
+        
+        const response = await authenticatedFetch('/api/auth/assign-classes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ teacherId, classIds: newClasses })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showMessage('assign-message', `Class assigned to ${teacher.name}!`, 'success');
+            loadClassAssignmentTable(); // Refresh
+        } else {
+            showMessage('assign-message', data.message || 'Failed to assign', 'error');
+        }
+    } catch (error) {
+        showMessage('assign-message', 'Error: ' + error.message, 'error');
+    }
+}
+
+async function unassignClass(classId) {
+    try {
+        // Find which teacher owns this class
+        let ownerTeacher = null;
+        for (const teacher of teachersList) {
+            if (teacher.assignedClasses && teacher.assignedClasses.includes(classId)) {
+                ownerTeacher = teacher;
+                break;
+            }
+        }
+        
+        if (!ownerTeacher) {
+            showMessage('assign-message', 'Class is not assigned', 'error');
+            return;
+        }
+        
+        // Remove this class from their list
+        const newClasses = ownerTeacher.assignedClasses.filter(c => c !== classId);
+        
+        const response = await authenticatedFetch('/api/auth/assign-classes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ teacherId: ownerTeacher.userId, classIds: newClasses })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showMessage('assign-message', `Class unassigned from ${ownerTeacher.name}`, 'success');
+            loadClassAssignmentTable(); // Refresh
+        } else {
+            showMessage('assign-message', data.message || 'Failed to unassign', 'error');
+        }
+    } catch (error) {
+        showMessage('assign-message', 'Error: ' + error.message, 'error');
+    }
+}
+
+// =============================================
+// ENROLL STUDENTS MODAL LOGIC
+// =============================================
+
+let currentEnrollClassId = null;
+let currentEnrollDeptId = null;
+let selectedEnrollStudents = new Set();
+let allEnrollableStudents = [];
+
+async function openEnrollStudentsModal(classId, className, deptId) {
+    currentEnrollClassId = classId;
+    currentEnrollDeptId = deptId;
+    selectedEnrollStudents.clear();
+    
+    document.getElementById('enroll-class-name').textContent = `Class: ${className} (${classId})`;
+    document.getElementById('enroll-count').textContent = '0 students selected';
+    document.getElementById('enroll-search').value = '';
+    
+    const listDiv = document.getElementById('enroll-student-list');
+    listDiv.innerHTML = '<div style="text-align: center; padding: 40px; color: #888;">Loading students...</div>';
+    
+    document.getElementById('enroll-students-modal').style.display = 'block';
+    
+    try {
+        // Fetch students for the department
+        let studentsRes;
+        if (deptId) {
+            studentsRes = await authenticatedFetch(`/api/students/department/${deptId}`);
+        } else {
+            studentsRes = await authenticatedFetch('/api/students');
+        }
+        
+        const studentsData = await studentsRes.json();
+        
+        if (studentsData.success) {
+            allEnrollableStudents = studentsData.data;
+            renderEnrollStudentList(allEnrollableStudents);
+        } else {
+            listDiv.innerHTML = '<div style="text-align: center; padding: 40px; color: #888;">No students found in this department.</div>';
+        }
+    } catch (error) {
+        console.error('Error loading students:', error);
+        listDiv.innerHTML = '<div style="text-align: center; padding: 20px; color: red;">Error loading students</div>';
+    }
+}
+
+function renderEnrollStudentList(students) {
+    const listDiv = document.getElementById('enroll-student-list');
+    
+    if (students.length === 0) {
+        listDiv.innerHTML = '<div style="text-align: center; padding: 40px; color: #888;">No students matching search.</div>';
+        return;
+    }
+    
+    let html = '';
+    students.forEach(student => {
+        // check if already enrolled
+        const isEnrolled = student.enrolledClasses && (student.enrolledClasses.includes(currentEnrollClassId) || student.enrolledClasses.includes(currentEnrollClassId.split(' ')[0]));
+        
+        const isSelected = selectedEnrollStudents.has(student.id);
+        
+        if (isEnrolled) {
+            html += `
+                <div style="display: flex; align-items: center; gap: 15px; padding: 12px 15px; border-bottom: 1px solid #f0f0f0; opacity: 0.6; background: #fafafa;">
+                    <div style="width: 24px; height: 24px; border-radius: 50%; background: #e0e0e0; color: #888; display: flex; align-items: center; justify-content: center; font-size: 0.8em;">✓</div>
+                    <div style="flex: 1;">
+                        <div style="font-weight: 500; color: #666;">${student.name}</div>
+                        <div style="font-size: 0.85em; color: #999;">${student.rollNumber} • ${student.id}</div>
+                    </div>
+                    <div style="font-size: 0.85em; color: #4caf50; font-weight: 500;">Enrolled</div>
+                </div>
+            `;
+        } else {
+            html += `
+                <div onclick="toggleStudentSelection('${student.id}')" 
+                     style="display: flex; align-items: center; gap: 15px; padding: 12px 15px; border-bottom: 1px solid #f0f0f0; cursor: pointer; transition: background 0.2s; background: ${isSelected ? '#e8f5e9' : 'white'};">
+                    <div style="width: 24px; height: 24px; border-radius: 50%; border: 2px solid ${isSelected ? '#38ef7d' : '#ddd'}; background: ${isSelected ? '#38ef7d' : 'white'}; display: flex; align-items: center; justify-content: center; transition: all 0.2s;">
+                        ${isSelected ? '<span style="color: white; font-size: 0.9em; font-weight: bold;">✓</span>' : ''}
+                    </div>
+                    <div style="flex: 1;">
+                        <div style="font-weight: 600; color: #333;">${student.name}</div>
+                        <div style="font-size: 0.85em; color: #666;">${student.rollNumber} • ${student.id}</div>
+                    </div>
+                </div>
+            `;
+        }
+    });
+    
+    listDiv.innerHTML = html;
+}
+
+function toggleStudentSelection(studentId) {
+    if (selectedEnrollStudents.has(studentId)) {
+        selectedEnrollStudents.delete(studentId);
+    } else {
+        selectedEnrollStudents.add(studentId);
+    }
+    
+    const countEl = document.getElementById('enroll-count');
+    countEl.textContent = `${selectedEnrollStudents.size} students selected`;
+    
+    renderEnrollStudentList(allEnrollableStudents.filter(s => {
+        const term = document.getElementById('enroll-search').value.toLowerCase();
+        return s.name.toLowerCase().includes(term) || s.rollNumber.toLowerCase().includes(term) || s.id.toLowerCase().includes(term);
+    }));
+}
+
+function filterEnrollStudents() {
+    const term = document.getElementById('enroll-search').value.toLowerCase();
+    const filtered = allEnrollableStudents.filter(s => 
+        s.name.toLowerCase().includes(term) || 
+        s.rollNumber.toLowerCase().includes(term) || 
+        s.id.toLowerCase().includes(term)
+    );
+    renderEnrollStudentList(filtered);
+}
+
+function closeEnrollStudentsModal() {
+    document.getElementById('enroll-students-modal').style.display = 'none';
+    currentEnrollClassId = null;
+    currentEnrollDeptId = null;
+    selectedEnrollStudents.clear();
+}
+
+async function enrollSelectedStudents() {
+    if (selectedEnrollStudents.size === 0) {
+        alert('Please select at least one student.');
+        return;
+    }
+    
+    const enrollBtn = document.querySelector('[onclick="enrollSelectedStudents()"]');
+    const originalText = enrollBtn.textContent;
+    enrollBtn.textContent = 'Enrolling...';
+    enrollBtn.disabled = true;
+    enrollBtn.style.opacity = '0.7';
+    
+    try {
+        const studentIds = Array.from(selectedEnrollStudents);
+        
+        const response = await authenticatedFetch('/api/students/enroll-bulk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                classId: currentEnrollClassId,
+                studentIds: studentIds
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showMessage('class-message', `Successfully enrolled ${studentIds.length} students!`, 'success');
+            closeEnrollStudentsModal();
+            loadClassesList();
+            loadStats();
+        } else {
+            alert(data.message || 'Error enrolling students');
+        }
+    } catch (error) {
+        console.error('Enrollment error:', error);
+        alert('Failed to enroll students: ' + error.message);
+    } finally {
+        enrollBtn.textContent = originalText;
+        enrollBtn.disabled = false;
+        enrollBtn.style.opacity = '1';
     }
 }
