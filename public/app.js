@@ -894,13 +894,18 @@ async function loadStudentsList() {
     listEl.innerHTML = '<div class="loading">Loading students...</div>';
     
     try {
-        // User requested: "teacher and admin will see the list of all students"
-        // So we fetch global list for everyone.
-        // Also fetch classes to map IDs to Names
+        // Determine URL based on role
+        let studentsUrl = '/api/students';
+        if (currentUserDetails && currentUserDetails.role === 'teacher' && currentUserDetails.departmentId) {
+            studentsUrl = `/api/students/department/${currentUserDetails.departmentId}`;
+        }
+
+        // Fetch students (filtered if teacher) and classes (for mapping)
         const [studentsRes, classesRes] = await Promise.all([
-            fetch('/api/students'),
+            fetch(studentsUrl),
             fetch('/api/classes')
         ]);
+
         
         const data = await studentsRes.json();
         const classesData = await classesRes.json();

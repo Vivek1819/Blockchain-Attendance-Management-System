@@ -294,7 +294,7 @@ const BaseBlockchain = require('./BaseBlockchain');
         chain.email = data.email;
         chain.enrolledClasses = data.enrolledClasses || [];
         chain.departmentId = data.departmentId;
-        chain.parentHash = data.parentHash;
+        chain.parentHash = data.parentHash || data.parentClassHash;
         chain.metadata = data.metadata;
         return chain;
     }

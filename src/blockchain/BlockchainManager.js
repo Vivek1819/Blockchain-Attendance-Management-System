@@ -358,7 +358,11 @@ class BlockchainManager {
     getStudentsByClass(classId) {
         const students = [];
         for (const [id, chain] of this.students) {
-            if (chain.classId === classId) {
+            // Check both enrolledClasses array and legacy classId
+            const isEnrolled = (chain.enrolledClasses && chain.enrolledClasses.includes(classId)) || 
+                               chain.classId === classId;
+            
+            if (isEnrolled) {
                 students.push(chain.getLatestStudentData());
             }
         }
