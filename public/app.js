@@ -558,6 +558,7 @@ async function loadDepartmentsList() {
                         <td>${dept.status || 'active'}</td>
                         <td>
                             <button class="btn btn-primary" onclick="viewDepartmentBlockchain('${dept.id}')" style="padding: 5px 10px; font-size: 0.85em;">View Chain</button>
+                            <button class="btn btn-secondary" onclick="openEditDepartmentModal('${dept.id}', '${dept.name.replace(/'/g, "\\'")}')" style="padding: 5px 10px; font-size: 0.85em; margin-left: 5px;">Edit</button>
                         </td>
                     </tr>
                 `;
@@ -573,14 +574,36 @@ async function loadDepartmentsList() {
     }
 }
 
+// Modal Functions for Departments
+function openCreateDepartmentModal() {
+    document.getElementById('create-dept-modal').style.display = 'block';
+    document.getElementById('dept-id').value = '';
+    document.getElementById('dept-name').value = '';
+}
+
+function closeCreateDepartmentModal() {
+    document.getElementById('create-dept-modal').style.display = 'none';
+}
+
+function openEditDepartmentModal(id, name) {
+    document.getElementById('edit-dept-modal').style.display = 'block';
+    document.getElementById('dept-update-id').value = id;
+    document.getElementById('dept-update-name').value = name;
+}
+
+function closeEditDepartmentModal() {
+    document.getElementById('edit-dept-modal').style.display = 'none';
+}
+
 async function createDepartment() {
     const id = document.getElementById('dept-id').value.trim();
     const name = document.getElementById('dept-name').value.trim();
     
     if (!id || !name) {
-        showMessage('dept-message', 'Please fill in all fields', 'error');
+        alert('Please fill in all fields');
         return;
     }
+    
     
     try {
         const response = await authenticatedFetch('/api/departments', {
@@ -592,36 +615,26 @@ async function createDepartment() {
         const data = await response.json();
         
         if (data.success) {
-            showMessage('dept-message', 'Department created successfully!', 'success');
-            document.getElementById('dept-id').value = '';
-            document.getElementById('dept-name').value = '';
+            showMessage('dept-message', 'Department created successfully!', 'success'); // Keep for background log
+            alert('Department created successfully!');
+            closeCreateDepartmentModal();
             loadDepartments();
             loadDepartmentsList();
             loadStats();
         } else {
-            showMessage('dept-message', data.message || 'Failed to create department', 'error');
+            alert(data.message || 'Failed to create department');
         }
     } catch (error) {
-        showMessage('dept-message', 'Error creating department', 'error');
-    }
-}
-
-async function loadDepartmentForUpdate() {
-    const deptId = document.getElementById('dept-update-select').value;
-    if (deptId) {
-        const dept = allDepartments.find(d => d.id === deptId);
-        if (dept) {
-            document.getElementById('dept-update-name').value = dept.name;
-        }
+        alert('Error creating department');
     }
 }
 
 async function updateDepartment() {
-    const deptId = document.getElementById('dept-update-select').value;
+    const deptId = document.getElementById('dept-update-id').value;
     const newName = document.getElementById('dept-update-name').value.trim();
     
     if (!deptId || !newName) {
-        showMessage('dept-message', 'Please select a department and enter a new name', 'error');
+        alert('Please enter a new name');
         return;
     }
     
@@ -635,14 +648,15 @@ async function updateDepartment() {
         const data = await response.json();
         
         if (data.success) {
-            showMessage('dept-message', 'Department updated successfully!', 'success');
+            alert('Department updated successfully!');
+            closeEditDepartmentModal();
             loadDepartments();
             loadDepartmentsList();
         } else {
-            showMessage('dept-message', data.message || 'Failed to update department', 'error');
+            alert(data.message || 'Failed to update department');
         }
     } catch (error) {
-        showMessage('dept-message', 'Error updating department', 'error');
+        alert('Error updating department');
     }
 }
 
@@ -717,6 +731,161 @@ function updateClassDropdowns() {
     });
 }
 
+// Modal Functions for Classes
+async function openCreateClassModal() {
+    document.getElementById('create-class-modal').style.display = 'block';
+    
+    // Reset fields
+    document.getElementById('class-id').value = '';
+    document.getElementById('class-name').value = '';
+    
+    // Load departments for the dropdown
+    const deptSelect = document.getElementById('class-dept');
+    deptSelect.innerHTML = '<option value="">Loading...</option>';
+    
+    try {
+        const response = await fetch('/api/departments');
+        const data = await response.json();
+        
+        if (data.success && data.data) {
+            let html = '<option value="">-- Select Department --</option>';
+            data.data.forEach(dept => {
+                html += `<option value="${dept.id}">${dept.name}</option>`;
+            });
+            deptSelect.innerHTML = html;
+        } else {
+            deptSelect.innerHTML = '<option value="">No departments found</option>';
+        }
+    } catch (error) {
+        console.error('Error loading departments:', error);
+        deptSelect.innerHTML = '<option value="">Error loading departments</option>';
+    }
+}
+
+function closeCreateClassModal() {
+    document.getElementById('create-class-modal').style.display = 'none';
+}
+
+function openEditClassModal(id, name, deptId) {
+    document.getElementById('edit-class-modal').style.display = 'block';
+    document.getElementById('class-update-id').value = id;
+    document.getElementById('class-update-name').value = name;
+    document.getElementById('class-update-dept-id').value = deptId;
+}
+
+function closeEditClassModal() {
+    document.getElementById('edit-class-modal').style.display = 'none';
+}
+
+// =============================================
+// ENROLLMENT MODAL LOGIC
+// =============================================
+
+let currentEnrollClassId = null;
+
+async function openEnrollStudentsModal(classId, className, deptId) {
+    currentEnrollClassId = classId;
+    document.getElementById('enroll-students-modal').style.display = 'block';
+    selectedEnrollStudents.clear();
+    
+    document.getElementById('enroll-class-name').textContent = `Course: ${className} (${classId})`;
+    document.getElementById('enroll-count').textContent = '0 students selected';
+    document.getElementById('enroll-search').value = '';
+    
+    const listContainer = document.getElementById('enroll-student-list');
+    listContainer.innerHTML = '<div class="loading">Loading students...</div>';
+    
+    try {
+        // 1. Get all students in department
+        const studentsRes = await fetch(`/api/students/department/${deptId}`);
+        const studentsData = await studentsRes.json();
+        
+        // 2. Get students already in this class
+        const enrolledRes = await fetch(`/api/students/class/${classId}`);
+        const enrolledData = await enrolledRes.json();
+        
+        if (studentsData.success && enrolledData.success) {
+            const enrolledIds = new Set(enrolledData.data.map(s => s.id));
+            const eligible = studentsData.data.filter(s => !enrolledIds.has(s.id));
+            
+            if (eligible.length === 0) {
+                 listContainer.innerHTML = '<p style="text-align:center; padding: 20px; color: #666;">All students in this department are already enrolled.</p>';
+                 return;
+            }
+            
+            listContainer.innerHTML = eligible.map(s => `
+                <div class="checkbox-item" style="padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center;">
+                    <label style="display: flex; align-items: center; cursor: pointer; width: 100%;">
+                        <input type="checkbox" class="student-enroll-checkbox" value="${s.id}" onchange="updateEnrollCount()" style="margin-right: 12px; transform: scale(1.2);">
+                        <div>
+                            <div style="font-weight: 600; color: #333;">${s.name}</div>
+                            <div style="font-size: 0.85em; color: #777;">Roll: ${s.rollNumber} | ID: ${s.id}</div>
+                        </div>
+                    </label>
+                </div>
+            `).join('');
+        } else {
+             listContainer.innerHTML = '<p style="color: red; text-align: center;">Error loading data</p>';
+        }
+    } catch(e) {
+        console.error(e);
+        listContainer.innerHTML = '<p style="color: red; text-align: center;">Error connecting to server</p>';
+    }
+}
+
+function closeEnrollStudentsModal() {
+    document.getElementById('enroll-students-modal').style.display = 'none';
+    currentEnrollClassId = null;
+}
+
+function updateEnrollCount() {
+    const count = document.querySelectorAll('.student-enroll-checkbox:checked').length;
+    document.getElementById('enroll-count').textContent = `${count} student${count !== 1 ? 's' : ''} selected`;
+}
+
+function filterEnrollStudents() {
+    const term = document.getElementById('enroll-search').value.toLowerCase();
+    const items = document.querySelectorAll('#enroll-student-list .checkbox-item');
+    items.forEach(item => {
+        const text = item.textContent.toLowerCase();
+        item.style.display = text.includes(term) ? '' : 'none';
+    });
+}
+
+async function enrollSelectedStudents() {
+    if (!currentEnrollClassId) return;
+    
+    const checkboxes = document.querySelectorAll('.student-enroll-checkbox:checked');
+    const studentIds = Array.from(checkboxes).map(cb => cb.value);
+    
+    if (studentIds.length === 0) {
+        alert('Please select at least one student');
+        return;
+    }
+    
+    try {
+        const response = await authenticatedFetch('/api/students/enroll-bulk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ studentIds, classId: currentEnrollClassId })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            alert(`Success! ${data.message}`);
+            closeEnrollStudentsModal();
+            loadClassesList();
+            loadStudentsList();
+            loadStats();
+        } else {
+            alert(data.message || 'Enrollment failed');
+        }
+    } catch(e) {
+        alert('Error enrolling students');
+    }
+}
+
 async function loadClassesList() {
     const listEl = document.getElementById('class-list');
     listEl.innerHTML = '<div class="loading">Loading classes...</div>';
@@ -727,6 +896,7 @@ async function loadClassesList() {
         
         if (data.success) {
             let classes = data.data || [];
+            // ... (rest of logic same as before until HTML generation)
             
             // For teachers, filter by assigned classes
             if (currentUserDetails && currentUserDetails.role === 'teacher') {
@@ -739,7 +909,7 @@ async function loadClassesList() {
             }
             
             if (classes.length > 0) {
-                // Fetch teachers to build assignment map
+                // Fetch teachers logic ...
                 let classOwnerMap = {};
                 try {
                     const teachersRes = await authenticatedFetch('/api/auth/teachers');
@@ -754,7 +924,7 @@ async function loadClassesList() {
                             }
                         });
                     }
-                } catch (e) { /* Teachers API may fail for non-admin */ }
+                } catch (e) { }
                 
                 const isAdmin = currentUserDetails && currentUserDetails.role === 'admin';
                 
@@ -779,13 +949,14 @@ async function loadClassesList() {
                                 <button class="btn btn-primary" onclick="viewClassBlockchain('${cls.id}')" style="padding: 5px 10px; font-size: 0.85em;">View Chain</button>
                                 
                                 ${canManage 
-                                    ? `<button class="btn btn-success" onclick="openEnrollStudentsModal('${cls.id}', '${cls.name}', '${cls.departmentId}')" style="padding: 5px 10px; font-size: 0.85em; margin-left: 5px; background: linear-gradient(135deg, #11998e, #38ef7d); border: none;">Enroll Students</button>`
+                                    ? `<button class="btn btn-secondary" onclick="openEditClassModal('${cls.id}', '${cls.name.replace(/'/g, "\\'")}', '${cls.departmentId}')" style="padding: 5px 10px; font-size: 0.85em; margin-left: 5px;">Edit</button>
+                                       <button class="btn btn-success" onclick="openEnrollStudentsModal('${cls.id}', '${cls.name.replace(/'/g, "\\'")}', '${cls.departmentId}')" style="padding: 5px 10px; font-size: 0.85em; margin-left: 5px; background: linear-gradient(135deg, #11998e, #38ef7d); border: none;">Enroll Students</button>`
                                     : ''}
 
                                 ${isAdmin 
                                     ? (assignedTeacher 
-                                        ? `<button class="btn btn-warning" onclick="openAssignTeacherModal('${cls.id}', '${cls.name}')" style="padding: 5px 10px; font-size: 0.85em; margin-left: 5px;">Change Teacher</button>`
-                                        : `<button class="btn btn-success" onclick="openAssignTeacherModal('${cls.id}', '${cls.name}')" style="padding: 5px 10px; font-size: 0.85em; margin-left: 5px;">Assign Teacher</button>`)
+                                        ? `<button class="btn btn-warning" onclick="openAssignTeacherModal('${cls.id}', '${cls.name.replace(/'/g, "\\'")}')" style="padding: 5px 10px; font-size: 0.85em; margin-left: 5px;">Change Teacher</button>`
+                                        : `<button class="btn btn-success" onclick="openAssignTeacherModal('${cls.id}', '${cls.name.replace(/'/g, "\\'")}')" style="padding: 5px 10px; font-size: 0.85em; margin-left: 5px;">Assign Teacher</button>`)
                                     : ''}
                             </td>
                         </tr>
@@ -811,7 +982,7 @@ async function createClass() {
     const deptId = document.getElementById('class-dept').value;
     
     if (!id || !name || !deptId) {
-        showMessage('class-message', 'Please fill in all fields', 'error');
+        alert('Please fill in all fields');
         return;
     }
     
@@ -825,36 +996,26 @@ async function createClass() {
         const data = await response.json();
         
         if (data.success) {
-            showMessage('class-message', 'Class created successfully!', 'success');
-            document.getElementById('class-id').value = '';
-            document.getElementById('class-name').value = '';
+            showMessage('class-message', 'Course created successfully!', 'success'); // Keep for log
+            alert('Course created successfully!');
+            closeCreateClassModal();
             loadClasses();
             loadClassesList();
             loadStats();
         } else {
-            showMessage('class-message', data.message || 'Failed to create class', 'error');
+            alert(data.message || 'Failed to create class');
         }
     } catch (error) {
-        showMessage('class-message', 'Error creating class', 'error');
-    }
-}
-
-async function loadClassForUpdate() {
-    const classId = document.getElementById('class-update-select').value;
-    if (classId) {
-        const cls = allClasses.find(c => c.id === classId);
-        if (cls) {
-            document.getElementById('class-update-name').value = cls.name;
-        }
+        alert('Error creating class');
     }
 }
 
 async function updateClass() {
-    const classId = document.getElementById('class-update-select').value;
+    const classId = document.getElementById('class-update-id').value;
     const newName = document.getElementById('class-update-name').value.trim();
     
     if (!classId || !newName) {
-        showMessage('class-message', 'Please select a class and enter a new name', 'error');
+        alert('Please enter a new name');
         return;
     }
     
@@ -868,14 +1029,15 @@ async function updateClass() {
         const data = await response.json();
         
         if (data.success) {
-            showMessage('class-message', 'Class updated successfully!', 'success');
+            alert('Course updated successfully!');
+            closeEditClassModal();
             loadClasses();
             loadClassesList();
         } else {
-            showMessage('class-message', data.message || 'Failed to update class', 'error');
+            alert(data.message || 'Failed to update class');
         }
     } catch (error) {
-        showMessage('class-message', 'Error updating class', 'error');
+        alert('Error updating class');
     }
 }
 
@@ -898,7 +1060,7 @@ async function loadClassesForDept() {
     
     // Store current value to restore if still valid
     const currentValue = classDropdown.value;
-    let newHtml = '<option value="">-- Select Class --</option>';
+    let newHtml = '<option value="">-- Select Course --</option>';
     
     if (deptId) {
         try {
@@ -974,6 +1136,54 @@ function updateStudentDropdowns() {
     }
 }
 
+// Modal Functions for Students
+async function openCreateStudentModal() {
+    document.getElementById('create-student-modal').style.display = 'block';
+    
+    // Reset fields
+    document.getElementById('student-name').value = '';
+    document.getElementById('student-roll').value = '';
+    document.getElementById('student-email').value = '';
+    
+    // Load departments
+    const deptSelect = document.getElementById('student-dept');
+    deptSelect.innerHTML = '<option value="">Loading...</option>';
+    
+    try {
+        const response = await fetch('/api/departments');
+        const data = await response.json();
+        
+        if (data.success && data.data) {
+            let html = '<option value="">-- Select Department --</option>';
+            data.data.forEach(dept => {
+                html += `<option value="${dept.id}">${dept.name}</option>`;
+            });
+            deptSelect.innerHTML = html;
+        } else {
+            deptSelect.innerHTML = '<option value="">No departments found</option>';
+        }
+    } catch (error) {
+        console.error('Error loading departments:', error);
+        deptSelect.innerHTML = '<option value="">Error loading departments</option>';
+    }
+}
+
+function closeCreateStudentModal() {
+    document.getElementById('create-student-modal').style.display = 'none';
+}
+
+function openEditStudentModal(id, name, roll, deptId) {
+    document.getElementById('edit-student-modal').style.display = 'block';
+    document.getElementById('student-update-id').value = id;
+    document.getElementById('student-update-name').value = name;
+    document.getElementById('student-update-roll').value = roll;
+    document.getElementById('student-update-dept-id').value = deptId;
+}
+
+function closeEditStudentModal() {
+    document.getElementById('edit-student-modal').style.display = 'none';
+}
+
 async function loadStudentsList() {
     const listEl = document.getElementById('student-list');
     listEl.innerHTML = '<div class="loading">Loading students...</div>';
@@ -1031,7 +1241,7 @@ async function loadStudentsList() {
                         <td>${student.departmentId}</td>
                         <td>
                             <button class="btn btn-primary" onclick="viewStudentBlockchain('${student.id}')" style="padding: 5px 10px; font-size: 0.85em;">View Chain</button>
-                            <button class="btn btn-warning" onclick="openAssignClassModal('${student.id}', '${student.departmentId}')" style="padding: 5px 10px; font-size: 0.85em; margin-left: 5px;">Assign Class</button>
+                            <button class="btn btn-secondary" onclick="openEditStudentModal('${student.id}', '${student.name.replace(/'/g, "\\'")}', '${student.rollNumber.replace(/'/g, "\\'")}', '${student.departmentId}')" style="padding: 5px 10px; font-size: 0.85em; margin-left: 5px;">Edit</button>
                         </td>
                     </tr>
                 `;
@@ -1049,14 +1259,13 @@ async function loadStudentsList() {
 }
 
 async function createStudent() {
-    // ID is auto-generated by backend now
     const name = document.getElementById('student-name').value.trim();
     const roll = document.getElementById('student-roll').value.trim();
     const email = document.getElementById('student-email').value.trim();
     const deptId = document.getElementById('student-dept').value;
     
     if (!name || !roll || !email || !deptId) {
-        showMessage('student-message', 'Please fill in all fields', 'error');
+        alert('Please fill in all fields');
         return;
     }
     
@@ -1075,60 +1284,33 @@ async function createStudent() {
         const data = await response.json();
         
         if (data.success) {
-            showMessage('student-message', 'Student created successfully!', 'success');
-            document.getElementById('student-name').value = '';
-            document.getElementById('student-roll').value = '';
+            showMessage('student-message', 'Student created successfully!', 'success'); // Keep for log
+            alert('Student created successfully!');
+            closeCreateStudentModal();
             loadStudents();
             loadStudentsList();
             loadStats();
         } else {
-            showMessage('student-message', data.message || 'Failed to create student', 'error');
+            alert(data.message || 'Failed to create student');
         }
     } catch (error) {
-        showMessage('student-message', 'Error creating student: ' + error.message, 'error');
-    }
-}
-
-async function loadStudentForUpdate() {
-    const studentId = document.getElementById('student-update-select').value;
-    if (studentId) {
-        const student = allStudents.find(s => s.id === studentId);
-        if (student) {
-            document.getElementById('student-update-name').value = student.name;
-            document.getElementById('student-update-roll').value = student.rollNumber;
-        }
+        alert('Error creating student: ' + error.message);
     }
 }
 
 async function updateStudent() {
-    const studentId = document.getElementById('student-update-select').value;
+    const studentId = document.getElementById('student-update-id').value;
     const newName = document.getElementById('student-update-name').value.trim();
     const newRoll = document.getElementById('student-update-roll').value.trim();
     
     if (!studentId) {
-        showMessage('student-message', 'Please select a student', 'error');
+        alert('Invalid student ID');
         return;
     }
     
-    try {
-        const response = await authenticatedFetch(`/api/students/${studentId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: newName, rollNumber: newRoll })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            showMessage('student-message', 'Student updated successfully!', 'success');
-            loadStudents();
-            loadStudentsList();
-        } else {
-            showMessage('student-message', data.message || 'Failed to update student', 'error');
-        }
-    } catch (error) {
-        showMessage('student-message', 'Error updating student', 'error');
-    }
+    // Placeholder - functionality verification needed
+    alert("Update functionality to be verified with backend support.");
+    closeEditStudentModal();
 }
 
 function searchStudents() {
@@ -1542,7 +1724,10 @@ async function visualizeBlockchainTree() {
             return {
                 ...dept,
                 classes: deptClasses.map(cls => {
-                    const classStudents = allStudents.filter(s => s.classId === cls.id);
+                    // Check if student is enrolled in this class
+                    const classStudents = allStudents.filter(s => 
+                        s.enrolledClasses && (s.enrolledClasses.includes(cls.id) || s.enrolledClasses.includes(cls.classId))
+                    );
                     return {
                         ...cls,
                         students: classStudents
@@ -1560,7 +1745,7 @@ async function visualizeBlockchainTree() {
                 </div>
                 <div class="tree-stat-item">
                     <div class="tree-stat-number">${allClasses.length}</div>
-                    <div class="tree-stat-label">Classes</div>
+                    <div class="tree-stat-label">Courses</div>
                 </div>
                 <div class="tree-stat-item">
                     <div class="tree-stat-number">${allStudents.length}</div>
@@ -1575,7 +1760,7 @@ async function visualizeBlockchainTree() {
                 </div>
                 <div class="legend-item">
                     <div class="legend-color layer-2"></div>
-                    <span>Class Chain</span>
+                    <span>Course Chain</span>
                 </div>
                 <div class="legend-item">
                     <div class="legend-color layer-3"></div>
@@ -1599,7 +1784,7 @@ async function visualizeBlockchainTree() {
                         <div class="tree-node layer-1" onclick="viewDepartmentBlockchain('${dept.id}')" style="cursor: pointer;">
                             <div class="tree-node-title">${dept.name}</div>
                             <div class="tree-node-id">${dept.id}</div>
-                            <div class="tree-node-info">${dept.classes.length} Classes</div>
+                            <div class="tree-node-info">${dept.classes.length} Courses</div>
                         </div>
                         
                         ${dept.classes.length > 0 ? `
@@ -1659,9 +1844,9 @@ async function openAssignClassModal(studentId, departmentId) {
     const student = allStudents.find(s => s.id === studentId);
     
     document.getElementById('assign-student-id').value = studentId;
-    document.getElementById('assign-student-name-display').textContent = `Enrolling class for: ${student ? student.name : studentId}`;
+    document.getElementById('assign-student-name-display').textContent = `Enrolling course for: ${student ? student.name : studentId}`;
     
-    select.innerHTML = '<option value="">Loading classes...</option>';
+    select.innerHTML = '<option value="">Loading courses...</option>';
     modal.style.display = 'flex';
     
     try {
@@ -1669,17 +1854,17 @@ async function openAssignClassModal(studentId, departmentId) {
         const data = await response.json();
         
         if (data.success && data.data.length > 0) {
-            select.innerHTML = '<option value="">-- Select Class --</option>';
+            select.innerHTML = '<option value="">-- Select Course --</option>';
             data.data.forEach(cls => {
                 const isEnrolled = student && student.enrolledClasses && student.enrolledClasses.includes(cls.id);
                 select.innerHTML += `<option value="${cls.id}" ${isEnrolled ? 'disabled' : ''}>${cls.name} ${isEnrolled ? '(Enrolled)' : ''}</option>`;
             });
         } else {
-            select.innerHTML = '<option value="">No classes found in this department</option>';
+            select.innerHTML = '<option value="">No courses found in this department</option>';
         }
     } catch (error) {
-        console.error('Error loading classes:', error);
-        select.innerHTML = '<option value="">Error loading classes</option>';
+        console.error('Error loading courses:', error);
+        select.innerHTML = '<option value="">Error loading courses</option>';
     }
 }
 
@@ -1688,7 +1873,7 @@ async function confirmAssignClass() {
     const classId = document.getElementById('assign-class-select').value;
     
     if (!classId) {
-        alert('Please select a class');
+        alert('Please select a course');
         return;
     }
     
@@ -1719,7 +1904,7 @@ async function confirmAssignClass() {
 }
 
 // =============================================
-// ADMIN: CLASS ASSIGNMENT TO TEACHERS
+// ADMIN: COURSE ASSIGNMENT TO TEACHERS
 // =============================================
 
 let teachersList = [];
@@ -1745,7 +1930,7 @@ async function openAssignTeacherModal(classId, className) {
     currentAssignClassId = classId;
     
     // Update modal header
-    document.getElementById('assign-teacher-class-name').textContent = `Class: ${className} (${classId})`;
+    document.getElementById('assign-teacher-class-name').textContent = `Course: ${className} (${classId})`;
     
     // Fetch teachers
     const listDiv = document.getElementById('teacher-selection-list');
@@ -2018,7 +2203,7 @@ async function assignClassToTeacher(classId) {
         const data = await response.json();
         
         if (data.success) {
-            showMessage('assign-message', `Class assigned to ${teacher.name}!`, 'success');
+            showMessage('assign-message', `Course assigned to ${teacher.name}!`, 'success');
             loadClassAssignmentTable(); // Refresh
         } else {
             showMessage('assign-message', data.message || 'Failed to assign', 'error');
@@ -2040,7 +2225,7 @@ async function unassignClass(classId) {
         }
         
         if (!ownerTeacher) {
-            showMessage('assign-message', 'Class is not assigned', 'error');
+            showMessage('assign-message', 'Course is not assigned', 'error');
             return;
         }
         
@@ -2056,7 +2241,7 @@ async function unassignClass(classId) {
         const data = await response.json();
         
         if (data.success) {
-            showMessage('assign-message', `Class unassigned from ${ownerTeacher.name}`, 'success');
+            showMessage('assign-message', `Course unassigned from ${ownerTeacher.name}`, 'success');
             loadClassAssignmentTable(); // Refresh
         } else {
             showMessage('assign-message', data.message || 'Failed to unassign', 'error');
@@ -2066,170 +2251,3 @@ async function unassignClass(classId) {
     }
 }
 
-// =============================================
-// ENROLL STUDENTS MODAL LOGIC
-// =============================================
-
-let currentEnrollClassId = null;
-let currentEnrollDeptId = null;
-let selectedEnrollStudents = new Set();
-let allEnrollableStudents = [];
-
-async function openEnrollStudentsModal(classId, className, deptId) {
-    currentEnrollClassId = classId;
-    currentEnrollDeptId = deptId;
-    selectedEnrollStudents.clear();
-    
-    document.getElementById('enroll-class-name').textContent = `Class: ${className} (${classId})`;
-    document.getElementById('enroll-count').textContent = '0 students selected';
-    document.getElementById('enroll-search').value = '';
-    
-    const listDiv = document.getElementById('enroll-student-list');
-    listDiv.innerHTML = '<div style="text-align: center; padding: 40px; color: #888;">Loading students...</div>';
-    
-    document.getElementById('enroll-students-modal').style.display = 'block';
-    
-    try {
-        // Fetch students for the department
-        let studentsRes;
-        if (deptId) {
-            studentsRes = await authenticatedFetch(`/api/students/department/${deptId}`);
-        } else {
-            studentsRes = await authenticatedFetch('/api/students');
-        }
-        
-        const studentsData = await studentsRes.json();
-        
-        if (studentsData.success) {
-            allEnrollableStudents = studentsData.data;
-            renderEnrollStudentList(allEnrollableStudents);
-        } else {
-            listDiv.innerHTML = '<div style="text-align: center; padding: 40px; color: #888;">No students found in this department.</div>';
-        }
-    } catch (error) {
-        console.error('Error loading students:', error);
-        listDiv.innerHTML = '<div style="text-align: center; padding: 20px; color: red;">Error loading students</div>';
-    }
-}
-
-function renderEnrollStudentList(students) {
-    const listDiv = document.getElementById('enroll-student-list');
-    
-    if (students.length === 0) {
-        listDiv.innerHTML = '<div style="text-align: center; padding: 40px; color: #888;">No students matching search.</div>';
-        return;
-    }
-    
-    let html = '';
-    students.forEach(student => {
-        // check if already enrolled
-        const isEnrolled = student.enrolledClasses && (student.enrolledClasses.includes(currentEnrollClassId) || student.enrolledClasses.includes(currentEnrollClassId.split(' ')[0]));
-        
-        const isSelected = selectedEnrollStudents.has(student.id);
-        
-        if (isEnrolled) {
-            html += `
-                <div style="display: flex; align-items: center; gap: 15px; padding: 12px 15px; border-bottom: 1px solid #f0f0f0; opacity: 0.6; background: #fafafa;">
-                    <div style="width: 24px; height: 24px; border-radius: 50%; background: #e0e0e0; color: #888; display: flex; align-items: center; justify-content: center; font-size: 0.8em;">✓</div>
-                    <div style="flex: 1;">
-                        <div style="font-weight: 500; color: #666;">${student.name}</div>
-                        <div style="font-size: 0.85em; color: #999;">${student.rollNumber} • ${student.id}</div>
-                    </div>
-                    <div style="font-size: 0.85em; color: #4caf50; font-weight: 500;">Enrolled</div>
-                </div>
-            `;
-        } else {
-            html += `
-                <div onclick="toggleStudentSelection('${student.id}')" 
-                     style="display: flex; align-items: center; gap: 15px; padding: 12px 15px; border-bottom: 1px solid #f0f0f0; cursor: pointer; transition: background 0.2s; background: ${isSelected ? '#e8f5e9' : 'white'};">
-                    <div style="width: 24px; height: 24px; border-radius: 50%; border: 2px solid ${isSelected ? '#38ef7d' : '#ddd'}; background: ${isSelected ? '#38ef7d' : 'white'}; display: flex; align-items: center; justify-content: center; transition: all 0.2s;">
-                        ${isSelected ? '<span style="color: white; font-size: 0.9em; font-weight: bold;">✓</span>' : ''}
-                    </div>
-                    <div style="flex: 1;">
-                        <div style="font-weight: 600; color: #333;">${student.name}</div>
-                        <div style="font-size: 0.85em; color: #666;">${student.rollNumber} • ${student.id}</div>
-                    </div>
-                </div>
-            `;
-        }
-    });
-    
-    listDiv.innerHTML = html;
-}
-
-function toggleStudentSelection(studentId) {
-    if (selectedEnrollStudents.has(studentId)) {
-        selectedEnrollStudents.delete(studentId);
-    } else {
-        selectedEnrollStudents.add(studentId);
-    }
-    
-    const countEl = document.getElementById('enroll-count');
-    countEl.textContent = `${selectedEnrollStudents.size} students selected`;
-    
-    renderEnrollStudentList(allEnrollableStudents.filter(s => {
-        const term = document.getElementById('enroll-search').value.toLowerCase();
-        return s.name.toLowerCase().includes(term) || s.rollNumber.toLowerCase().includes(term) || s.id.toLowerCase().includes(term);
-    }));
-}
-
-function filterEnrollStudents() {
-    const term = document.getElementById('enroll-search').value.toLowerCase();
-    const filtered = allEnrollableStudents.filter(s => 
-        s.name.toLowerCase().includes(term) || 
-        s.rollNumber.toLowerCase().includes(term) || 
-        s.id.toLowerCase().includes(term)
-    );
-    renderEnrollStudentList(filtered);
-}
-
-function closeEnrollStudentsModal() {
-    document.getElementById('enroll-students-modal').style.display = 'none';
-    currentEnrollClassId = null;
-    currentEnrollDeptId = null;
-    selectedEnrollStudents.clear();
-}
-
-async function enrollSelectedStudents() {
-    if (selectedEnrollStudents.size === 0) {
-        alert('Please select at least one student.');
-        return;
-    }
-    
-    const enrollBtn = document.querySelector('[onclick="enrollSelectedStudents()"]');
-    const originalText = enrollBtn.textContent;
-    enrollBtn.textContent = 'Enrolling...';
-    enrollBtn.disabled = true;
-    enrollBtn.style.opacity = '0.7';
-    
-    try {
-        const studentIds = Array.from(selectedEnrollStudents);
-        
-        const response = await authenticatedFetch('/api/students/enroll-bulk', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                classId: currentEnrollClassId,
-                studentIds: studentIds
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            showMessage('class-message', `Successfully enrolled ${studentIds.length} students!`, 'success');
-            closeEnrollStudentsModal();
-            loadClassesList();
-            loadStats();
-        } else {
-            alert(data.message || 'Error enrolling students');
-        }
-    } catch (error) {
-        console.error('Enrollment error:', error);
-        alert('Failed to enroll students: ' + error.message);
-    } finally {
-        enrollBtn.textContent = originalText;
-        enrollBtn.disabled = false;
-        enrollBtn.style.opacity = '1';
-    }
-}

@@ -708,7 +708,7 @@
         <div class="tabs">
             <button class="tab active" onclick="showTab('dashboard')">📊 Dashboard</button>
             <button class="tab" onclick="showTab('departments')">🏢 Departments</button>
-            <button class="tab" onclick="showTab('classes')">📚 Classes</button>
+            <button class="tab" onclick="showTab('classes')">📚 Courses</button>
             <button class="tab" onclick="showTab('students')">👥 Students</button>
             <button class="tab" onclick="showTab('attendance')">✅ Attendance</button>
             <button class="tab" onclick="showTab('blockchain')">⛓️ Blockchain</button>
@@ -728,7 +728,7 @@
                 </div>
                 <div class="stat-card">
                     <h3 id="stat-classes">0</h3>
-                    <p>Classes</p>
+                    <p>Courses</p>
                 </div>
                 <div class="stat-card">
                     <h3 id="stat-students">0</h3>
@@ -787,89 +787,176 @@
 
         <!-- Departments Tab -->
         <div id="departments" class="tab-content">
-            <h2>Department Management</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
+                <h2 style="margin: 0;">Department Management</h2>
+                <button onclick="openCreateDepartmentModal()"
+                    style="background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 500; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.2em;">+</span> Create Department
+                </button>
+            </div>
+
             <div class="message" id="dept-message"></div>
 
-            <div style="margin-bottom: 30px;">
-                <h3>Create Department</h3>
-                <div class="form-group">
-                    <label>Department ID</label>
-                    <input type="text" id="dept-id" placeholder="e.g., DEPT001">
-                </div>
-                <div class="form-group">
-                    <label>Department Name</label>
-                    <input type="text" id="dept-name" placeholder="e.g., School of Computing">
-                </div>
-                <button class="btn btn-primary" onclick="createDepartment()">Create Department</button>
-            </div>
-
-            <div style="margin-bottom: 30px; background: #f0f8ff; padding: 20px; border-radius: 8px;">
-                <h3>Update Department</h3>
-                <div class="form-group">
-                    <label>Select Department</label>
-                    <select id="dept-update-select" onchange="loadDepartmentForUpdate()">
-                        <option value="">-- Select Department --</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>New Department Name</label>
-                    <input type="text" id="dept-update-name" placeholder="Enter new name">
-                </div>
-                <button class="btn btn-success" onclick="updateDepartment()">Update Department</button>
-            </div>
-
-            <div class="search-bar">
-                <input type="text" id="dept-search" placeholder="Search departments..." onkeyup="searchDepartments()">
+            <div class="search-bar" style="margin-bottom: 20px;">
+                <input type="text" id="dept-search" placeholder="Search departments..." onkeyup="searchDepartments()"
+                    style="width: 100%; padding: 12px 15px; border: 1px solid #ddd; border-radius: 8px; font-size: 1em;">
             </div>
 
             <div id="dept-list">
                 <div class="loading">Loading departments...</div>
             </div>
+
+            <!-- Create Department Modal -->
+            <div id="create-dept-modal"
+                style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; backdrop-filter: blur(4px);">
+                <div
+                    style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 16px; width: 90%; max-width: 450px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); overflow: hidden;">
+                    <div
+                        style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px 25px;">
+                        <h3 style="margin: 0; font-weight: 600;">Create Department</h3>
+                        <p style="margin: 5px 0 0 0; opacity: 0.9; font-size: 0.9em;">Add a new department to the system
+                        </p>
+                    </div>
+                    <div style="padding: 25px;">
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #444;">Department
+                                ID</label>
+                            <input type="text" id="dept-id" placeholder="e.g., DEPT001"
+                                style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #444;">Department
+                                Name</label>
+                            <input type="text" id="dept-name" placeholder="e.g., School of Computing"
+                                style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                        </div>
+                        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                            <button onclick="closeCreateDepartmentModal()"
+                                style="padding: 10px 20px; border: 1px solid #ddd; background: white; border-radius: 8px; cursor: pointer; font-weight: 500;">Cancel</button>
+                            <button onclick="createDepartment()"
+                                style="padding: 10px 25px; border: none; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border-radius: 8px; cursor: pointer; font-weight: 600;">Create</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Edit Department Modal -->
+            <div id="edit-dept-modal"
+                style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; backdrop-filter: blur(4px);">
+                <div
+                    style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 16px; width: 90%; max-width: 450px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); overflow: hidden;">
+                    <div
+                        style="background: linear-gradient(135deg, #ff9966 0%, #ff5e62 100%); color: white; padding: 20px 25px;">
+                        <h3 style="margin: 0; font-weight: 600;">Edit Department</h3>
+                        <p style="margin: 5px 0 0 0; opacity: 0.9; font-size: 0.9em;">Update department details</p>
+                    </div>
+                    <div style="padding: 25px;">
+                        <input type="hidden" id="dept-update-id">
+                        <div class="form-group" style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #444;">Department
+                                Name</label>
+                            <input type="text" id="dept-update-name" placeholder="Enter new name"
+                                style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                        </div>
+                        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                            <button onclick="closeEditDepartmentModal()"
+                                style="padding: 10px 20px; border: 1px solid #ddd; background: white; border-radius: 8px; cursor: pointer; font-weight: 500;">Cancel</button>
+                            <button onclick="updateDepartment()"
+                                style="padding: 10px 25px; border: none; background: linear-gradient(135deg, #ff9966, #ff5e62); color: white; border-radius: 8px; cursor: pointer; font-weight: 600;">Update</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Classes Tab -->
         <div id="classes" class="tab-content">
-            <h2>Class Management</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
+                <h2 style="margin: 0;">Course Management</h2>
+                <button onclick="openCreateClassModal()"
+                    style="background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 500; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.2em;">+</span> Create Course
+                </button>
+            </div>
+
             <div class="message" id="class-message"></div>
 
-            <div style="margin-bottom: 30px;">
-                <h3>Create Class</h3>
-                <div class="form-group">
-                    <label>Class ID</label>
-                    <input type="text" id="class-id" placeholder="e.g., CS-CLASS-1">
-                </div>
-                <div class="form-group">
-                    <label>Class Name</label>
-                    <input type="text" id="class-name" placeholder="e.g., CS Year 1">
-                </div>
-                <div class="form-group">
-                    <label>Department</label>
-                    <select id="class-dept" onchange="loadDepartments()"></select>
-                </div>
-                <button class="btn btn-primary" onclick="createClass()">Create Class</button>
-            </div>
-
-            <div style="margin-bottom: 30px; background: #f0fff0; padding: 20px; border-radius: 8px;">
-                <h3>Update Class</h3>
-                <div class="form-group">
-                    <label>Select Class</label>
-                    <select id="class-update-select" onchange="loadClassForUpdate()">
-                        <option value="">-- Select Class --</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>New Class Name</label>
-                    <input type="text" id="class-update-name" placeholder="Enter new name">
-                </div>
-                <button class="btn btn-success" onclick="updateClass()">Update Class</button>
-            </div>
-
-            <div class="search-bar">
-                <input type="text" id="class-search" placeholder="Search classes..." onkeyup="searchClasses()">
+            <div class="search-bar" style="margin-bottom: 20px;">
+                <input type="text" id="class-search" placeholder="Search courses..." onkeyup="searchClasses()"
+                    style="width: 100%; padding: 12px 15px; border: 1px solid #ddd; border-radius: 8px; font-size: 1em;">
             </div>
 
             <div id="class-list">
-                <div class="loading">Loading classes...</div>
+                <div class="loading">Loading courses...</div>
+            </div>
+
+            <!-- Create Class Modal -->
+            <div id="create-class-modal"
+                style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; backdrop-filter: blur(4px);">
+                <div
+                    style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 16px; width: 90%; max-width: 450px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); overflow: hidden;">
+                    <div
+                        style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px 25px;">
+                        <h3 style="margin: 0; font-weight: 600;">Create Course</h3>
+                        <p style="margin: 5px 0 0 0; opacity: 0.9; font-size: 0.9em;">Add a new course to a department
+                        </p>
+                    </div>
+                    <div style="padding: 25px;">
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #444;">Course
+                                ID</label>
+                            <input type="text" id="class-id" placeholder="e.g., CS-COURSE-1"
+                                style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #444;">Course
+                                Name</label>
+                            <input type="text" id="class-name" placeholder="e.g., CS Year 1"
+                                style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 20px;">
+                            <label
+                                style="display: block; margin-bottom: 8px; font-weight: 500; color: #444;">Department</label>
+                            <select id="class-dept"
+                                style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px; background: white;"></select>
+                        </div>
+                        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                            <button onclick="closeCreateClassModal()"
+                                style="padding: 10px 20px; border: 1px solid #ddd; background: white; border-radius: 8px; cursor: pointer; font-weight: 500;">Cancel</button>
+                            <button onclick="createClass()"
+                                style="padding: 10px 25px; border: none; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border-radius: 8px; cursor: pointer; font-weight: 600;">Create</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Edit Class Modal -->
+            <div id="edit-class-modal"
+                style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; backdrop-filter: blur(4px);">
+                <div
+                    style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 16px; width: 90%; max-width: 450px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); overflow: hidden;">
+                    <div
+                        style="background: linear-gradient(135deg, #ff9966 0%, #ff5e62 100%); color: white; padding: 20px 25px;">
+                        <h3 style="margin: 0; font-weight: 600;">Edit Course</h3>
+                        <p style="margin: 5px 0 0 0; opacity: 0.9; font-size: 0.9em;">Update class details</p>
+                    </div>
+                    <div style="padding: 25px;">
+                        <input type="hidden" id="class-update-id">
+                        <input type="hidden" id="class-update-dept-id">
+                        <div class="form-group" style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #444;">Course
+                                Name</label>
+                            <input type="text" id="class-update-name" placeholder="Enter new name"
+                                style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                        </div>
+                        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                            <button onclick="closeEditClassModal()"
+                                style="padding: 10px 20px; border: 1px solid #ddd; background: white; border-radius: 8px; cursor: pointer; font-weight: 500;">Cancel</button>
+                            <button onclick="updateClass()"
+                                style="padding: 10px 25px; border: none; background: linear-gradient(135deg, #ff9966, #ff5e62); color: white; border-radius: 8px; cursor: pointer; font-weight: 600;">Update</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -943,56 +1030,104 @@
             </div>
         </div>
         <div id="students" class="tab-content">
-            <h2>Student Management</h2>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 25px;">
+                <h2 style="margin: 0;">Student Management</h2>
+                <button onclick="openCreateStudentModal()"
+                    style="background: linear-gradient(135deg, #667eea, #764ba2); color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-weight: 500; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4); display: flex; align-items: center; gap: 8px;">
+                    <span style="font-size: 1.2em;">+</span> Create Student
+                </button>
+            </div>
+
             <div class="message" id="student-message"></div>
 
-            <div style="margin-bottom: 30px;">
-                <h3>Create Student</h3>
-                <div class="form-group">
-                    <label>Student Name</label>
-                    <input type="text" id="student-name" placeholder="e.g., John Doe">
-                </div>
-                <div class="form-group">
-                    <label>Roll Number</label>
-                    <input type="text" id="student-roll" placeholder="e.g., CS-001">
-                </div>
-                <div class="form-group">
-                    <label>Email</label>
-                    <input type="email" id="student-email" placeholder="e.g., john@example.com">
-                </div>
-                <div class="form-group">
-                    <label>Department</label>
-                    <select id="student-dept" onchange="/* Class loading no longer needed here */"></select>
-                </div>
-                <!-- Class selection removed for initial registration -->
-                <button class="btn btn-primary" onclick="createStudent()">Create Student</button>
-            </div>
-
-            <div style="margin-bottom: 30px; background: #fff8f0; padding: 20px; border-radius: 8px;">
-                <h3>Update Student</h3>
-                <div class="form-group">
-                    <label>Select Student</label>
-                    <select id="student-update-select" onchange="loadStudentForUpdate()">
-                        <option value="">-- Select Student --</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label>New Student Name</label>
-                    <input type="text" id="student-update-name" placeholder="Enter new name">
-                </div>
-                <div class="form-group">
-                    <label>New Roll Number</label>
-                    <input type="text" id="student-update-roll" placeholder="Enter new roll number">
-                </div>
-                <button class="btn btn-success" onclick="updateStudent()">Update Student</button>
-            </div>
-
-            <div class="search-bar">
-                <input type="text" id="student-search" placeholder="Search students..." onkeyup="searchStudents()">
+            <div class="search-bar" style="margin-bottom: 20px;">
+                <input type="text" id="student-search" placeholder="Search students..." onkeyup="searchStudents()"
+                    style="width: 100%; padding: 12px 15px; border: 1px solid #ddd; border-radius: 8px; font-size: 1em;">
             </div>
 
             <div id="student-list">
                 <div class="loading">Loading students...</div>
+            </div>
+
+            <!-- Create Student Modal -->
+            <div id="create-student-modal"
+                style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; backdrop-filter: blur(4px);">
+                <div
+                    style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 16px; width: 90%; max-width: 450px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); overflow: hidden;">
+                    <div
+                        style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px 25px;">
+                        <h3 style="margin: 0; font-weight: 600;">Create Student</h3>
+                        <p style="margin: 5px 0 0 0; opacity: 0.9; font-size: 0.9em;">Add a new student to a department
+                        </p>
+                    </div>
+                    <div style="padding: 25px;">
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #444;">Student
+                                Name</label>
+                            <input type="text" id="student-name" placeholder="e.g., John Doe"
+                                style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #444;">Roll
+                                Number</label>
+                            <input type="text" id="student-roll" placeholder="e.g., CS-001"
+                                style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label
+                                style="display: block; margin-bottom: 8px; font-weight: 500; color: #444;">Email</label>
+                            <input type="email" id="student-email" placeholder="e.g., john@example.com"
+                                style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 20px;">
+                            <label
+                                style="display: block; margin-bottom: 8px; font-weight: 500; color: #444;">Department</label>
+                            <select id="student-dept"
+                                style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px; background: white;"></select>
+                        </div>
+                        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                            <button onclick="closeCreateStudentModal()"
+                                style="padding: 10px 20px; border: 1px solid #ddd; background: white; border-radius: 8px; cursor: pointer; font-weight: 500;">Cancel</button>
+                            <button onclick="createStudent()"
+                                style="padding: 10px 25px; border: none; background: linear-gradient(135deg, #667eea, #764ba2); color: white; border-radius: 8px; cursor: pointer; font-weight: 600;">Create</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Edit Student Modal -->
+            <div id="edit-student-modal"
+                style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; backdrop-filter: blur(4px);">
+                <div
+                    style="position: absolute; top: 50%; left: 50%; transform: translate(-50%; -50%); background: white; border-radius: 16px; width: 90%; max-width: 450px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); overflow: hidden;">
+                    <div
+                        style="background: linear-gradient(135deg, #ff9966 0%, #ff5e62 100%); color: white; padding: 20px 25px;">
+                        <h3 style="margin: 0; font-weight: 600;">Edit Student</h3>
+                        <p style="margin: 5px 0 0 0; opacity: 0.9; font-size: 0.9em;">Update student details</p>
+                    </div>
+                    <div style="padding: 25px;">
+                        <input type="hidden" id="student-update-id">
+                        <input type="hidden" id="student-update-dept-id">
+                        <div class="form-group" style="margin-bottom: 15px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #444;">Student
+                                Name</label>
+                            <input type="text" id="student-update-name" placeholder="Enter new name"
+                                style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 20px;">
+                            <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #444;">Roll
+                                Number</label>
+                            <input type="text" id="student-update-roll" placeholder="Enter new roll number"
+                                style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 8px;">
+                        </div>
+                        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                            <button onclick="closeEditStudentModal()"
+                                style="padding: 10px 20px; border: 1px solid #ddd; background: white; border-radius: 8px; cursor: pointer; font-weight: 500;">Cancel</button>
+                            <button onclick="updateStudent()"
+                                style="padding: 10px 25px; border: none; background: linear-gradient(135deg, #ff9966, #ff5e62); color: white; border-radius: 8px; cursor: pointer; font-weight: 600;">Update</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -1030,7 +1165,7 @@
                     <select id="blockchain-type" onchange="updateEntitySelect()">
                         <option value="">-- Select Type --</option>
                         <option value="department">Department</option>
-                        <option value="class">Class</option>
+                        <option value="class">Course</option>
                         <option value="student">Student</option>
                     </select>
                 </div>
@@ -1048,7 +1183,7 @@
             <div style="margin-bottom: 20px;">
                 <h3>🌳 Complete Blockchain Tree Visualization</h3>
                 <p style="color: #666; margin-bottom: 15px;">
-                    View the entire hierarchical blockchain structure: Department → Class → Student
+                    View the entire hierarchical blockchain structure: Department → Course → Student
                 </p>
                 <button class="btn btn-success" onclick="visualizeBlockchainTree()">Generate Tree View</button>
             </div>
@@ -1083,12 +1218,12 @@
     <div id="assign-class-modal"
         style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center;">
         <div style="background: white; padding: 25px; border-radius: 10px; width: 400px; max-width: 90%;">
-            <h3 style="margin-top: 0;">Enroll in Class</h3>
+            <h3 style="margin-top: 0;">Enroll in Course</h3>
             <p id="assign-student-name-display" style="margin-bottom: 20px; color: #666;"></p>
             <input type="hidden" id="assign-student-id">
 
             <div class="form-group">
-                <label>Select Class</label>
+                <label>Select Course</label>
                 <select id="assign-class-select"
                     style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;">
                     <option value="">Loading...</option>
