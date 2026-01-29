@@ -126,6 +126,23 @@ async function updateAuthUI() {
     }
 }
 
+/**
+ * Helper to make authenticated requests
+ */
+async function authenticatedFetch(url, options = {}) {
+    if (!authToken) {
+        throw new Error('No auth token available');
+    }
+    
+    const headers = options.headers || {};
+    headers['Authorization'] = `Bearer ${authToken}`;
+    
+    return fetch(url, {
+        ...options,
+        headers: headers
+    });
+}
+
 function applyTeacherConstraints(userInfo) {
     if (!userInfo || !userInfo.departmentId) return;
     
@@ -135,12 +152,17 @@ function applyTeacherConstraints(userInfo) {
     deptDropdowns.forEach(id => {
         const dropdown = document.getElementById(id);
         if (dropdown) {
-            // Set value (even if options aren't loaded yet, we'll try)
-            // Note: We might need to ensure options are loaded first, or force the value
-            // We'll also hide the parent form group
-            const formGroup = dropdown.closest('.form-group');
-            if (formGroup) {
-                formGroup.style.display = 'none';
+            // Attempt to set value if options are already loaded
+            if (userInfo.departmentId) {
+                dropdown.value = userInfo.departmentId;
+                
+                // If value was successfully set (options existed), we could hide it here.
+                // But safer to let updateDepartmentDropdowns handle the UI state to avoid 
+                // hiding an empty/invalid dropdown.
+                if (dropdown.value === userInfo.departmentId) {
+                     const formGroup = dropdown.closest('.form-group');
+                     // formGroup.style.display = 'none'; // Keep it visible until fully loaded
+                }
             }
         }
     });
@@ -980,7 +1002,6 @@ async function createStudent() {
         
         if (data.success) {
             showMessage('student-message', 'Student created successfully!', 'success');
-            document.getElementById('student-id').value = '';
             document.getElementById('student-name').value = '';
             document.getElementById('student-roll').value = '';
             loadStudents();
@@ -990,7 +1011,7 @@ async function createStudent() {
             showMessage('student-message', data.message || 'Failed to create student', 'error');
         }
     } catch (error) {
-        showMessage('student-message', 'Error creating student', 'error');
+        showMessage('student-message', 'Error creating student: ' + error.message, 'error');
     }
 }
 

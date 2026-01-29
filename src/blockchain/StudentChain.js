@@ -41,7 +41,7 @@ const BaseBlockchain = require('./BaseBlockchain');
             studentName: this.name,
             rollNumber: this.rollNumber,
             email: this.email,
-            enrolledClasses: this.enrolledClasses,
+            enrolledClasses: [...this.enrolledClasses],
             departmentId: this.departmentId,
             data: studentData,
             timestamp: Date.now(),

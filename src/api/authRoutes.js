@@ -28,8 +28,13 @@ module.exports = function(blockchainManager) {
             // Get department name if user is a teacher
             let departmentName = null;
             if (userRole.departmentId) {
-                const dept = blockchainManager.getDepartment(userRole.departmentId);
-                departmentName = dept ? dept.name : null;
+                try {
+                    const dept = blockchainManager.getDepartment(userRole.departmentId);
+                    departmentName = dept ? dept.name : null;
+                } catch (e) {
+                    // Department might have been deleted but user role persists
+                    departmentName = 'Unknown (Deleted?)';
+                }
             }
 
             res.json({
