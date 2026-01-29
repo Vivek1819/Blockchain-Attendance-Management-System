@@ -36,12 +36,15 @@ module.exports = function(blockchainManager) {
                 });
             }
 
-            // Teacher Restriction: Check department access
-            if (userRole.departmentId !== student.departmentId) {
-                return res.status(403).json({
-                    success: false,
-                    message: 'You can only mark attendance for students in your department'
-                });
+            // Teacher Restriction: Check if class is in their assigned classes
+            if (userRole.role === 'teacher') {
+                const assignedClasses = userRole.assignedClasses || [];
+                if (!assignedClasses.includes(classId)) {
+                    return res.status(403).json({
+                        success: false,
+                        message: 'You can only mark attendance for students in your assigned classes'
+                    });
+                }
             }
 
             if (!studentId || !classId || !status) {
@@ -114,13 +117,16 @@ module.exports = function(blockchainManager) {
                         continue;
                     }
 
-                    // Check department access for each student
-                    if (userRole.role !== 'admin' && userRole.departmentId !== student.departmentId) {
-                        errors.push({ 
-                            studentId: record.studentId, 
-                            error: 'Not authorized for this student\'s department' 
-                        });
-                        continue;
+                    // Check if teacher has access to this class
+                    if (userRole.role === 'teacher') {
+                        const assignedClasses = userRole.assignedClasses || [];
+                        if (!assignedClasses.includes(record.classId)) {
+                            errors.push({ 
+                                studentId: record.studentId, 
+                                error: 'Not authorized for this class' 
+                            });
+                            continue;
+                        }
                     }
 
                     // Check for duplicate attendance

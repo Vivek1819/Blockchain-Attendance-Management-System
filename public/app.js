@@ -144,10 +144,14 @@ async function authenticatedFetch(url, options = {}) {
     const headers = options.headers || {};
     headers['Authorization'] = `Bearer ${authToken}`;
     
-    return fetch(url, {
+    const response = await fetch(url, {
         ...options,
         headers: headers
     });
+    
+    // If response is not OK (400, 500, etc.), still return it
+    // The caller will check response.ok or data.success
+    return response;
 }
 
 function applyTeacherConstraints(userInfo) {
@@ -782,6 +786,7 @@ function closeEditClassModal() {
 // =============================================
 
 let currentEnrollClassId = null;
+let selectedEnrollStudents = new Set();
 
 async function openEnrollStudentsModal(classId, className, deptId) {
     currentEnrollClassId = classId;
@@ -797,16 +802,24 @@ async function openEnrollStudentsModal(classId, className, deptId) {
     
     try {
         // 1. Get all students in department
+        console.log('[ENROLL] Fetching students for department:', deptId);
         const studentsRes = await fetch(`/api/students/department/${deptId}`);
         const studentsData = await studentsRes.json();
+        console.log('[ENROLL] Students API response:', studentsData);
         
         // 2. Get students already in this class
+        console.log('[ENROLL] Fetching enrolled students for class:', classId);
         const enrolledRes = await fetch(`/api/students/class/${classId}`);
         const enrolledData = await enrolledRes.json();
+        console.log('[ENROLL] Enrolled students API response:', enrolledData);
         
         if (studentsData.success && enrolledData.success) {
             const enrolledIds = new Set(enrolledData.data.map(s => s.id));
             const eligible = studentsData.data.filter(s => !enrolledIds.has(s.id));
+            
+            console.log('[ENROLL] Total students in dept:', studentsData.data.length);
+            console.log('[ENROLL] Already enrolled:', enrolledIds.size);
+            console.log('[ENROLL] Eligible for enrollment:', eligible.length);
             
             if (eligible.length === 0) {
                  listContainer.innerHTML = '<p style="text-align:center; padding: 20px; color: #666;">All students in this department are already enrolled.</p>';
@@ -825,10 +838,11 @@ async function openEnrollStudentsModal(classId, className, deptId) {
                 </div>
             `).join('');
         } else {
+             console.error('[ENROLL] API error - students:', studentsData, 'enrolled:', enrolledData);
              listContainer.innerHTML = '<p style="color: red; text-align: center;">Error loading data</p>';
         }
     } catch(e) {
-        console.error(e);
+        console.error('[ENROLL] Exception:', e);
         listContainer.innerHTML = '<p style="color: red; text-align: center;">Error connecting to server</p>';
     }
 }
@@ -927,8 +941,26 @@ async function loadClassesList() {
                 } catch (e) { }
                 
                 const isAdmin = currentUserDetails && currentUserDetails.role === 'admin';
+                const isTeacher = currentUserDetails && currentUserDetails.role === 'teacher';
                 
-                let html = '<table><thead><tr><th>ID</th><th>Name</th><th>Department</th><th>Teacher</th><th>Actions</th></tr></thead><tbody>';
+                // Fetch student counts for teacher view
+                let studentCounts = {};
+                if (isTeacher) {
+                    for (const cls of classes) {
+                        try {
+                            const studentsRes = await fetch(`/api/students/class/${cls.id}`);
+                            const studentsData = await studentsRes.json();
+                            studentCounts[cls.id] = studentsData.success ? studentsData.data.length : 0;
+                        } catch (e) {
+                            studentCounts[cls.id] = 0;
+                        }
+                    }
+                }
+                
+                // Different headers for teacher vs admin
+                let html = '<table><thead><tr><th>ID</th><th>Name</th><th>Department</th>';
+                html += isTeacher ? '<th># of Students</th>' : '<th>Teacher</th>';
+                html += '<th>Actions</th></tr></thead><tbody>';
                 
                 classes.forEach(cls => {
                     const assignedTeacher = classOwnerMap[cls.id] || classOwnerMap[cls.classId];
@@ -941,9 +973,11 @@ async function loadClassesList() {
                             <td>${cls.name}</td>
                             <td>${cls.departmentId}</td>
                             <td>
-                                ${assignedTeacher 
-                                    ? `<span style="background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 4px 12px; border-radius: 15px; font-size: 0.85em;">${assignedTeacher}</span>`
-                                    : '<span style="color: #aaa; font-style: italic;">Unassigned</span>'}
+                                ${isTeacher 
+                                    ? `<span style="background: linear-gradient(135deg, #11998e, #38ef7d); color: white; padding: 4px 12px; border-radius: 15px; font-size: 0.85em; font-weight: 600;">${studentCounts[cls.id] || 0}</span>`
+                                    : (assignedTeacher 
+                                        ? `<span style="background: linear-gradient(135deg, #667eea, #764ba2); color: white; padding: 4px 12px; border-radius: 15px; font-size: 0.85em;">${assignedTeacher}</span>`
+                                        : '<span style="color: #aaa; font-style: italic;">Unassigned</span>')}
                             </td>
                             <td>
                                 <button class="btn btn-primary" onclick="viewClassBlockchain('${cls.id}')" style="padding: 5px 10px; font-size: 0.85em;">View Chain</button>
@@ -2191,8 +2225,15 @@ async function assignClassToTeacher(classId) {
     try {
         // Get current teacher's assigned classes and add this one
         const teacher = teachersList.find(t => t.userId === teacherId);
+        console.log('[ASSIGN] Teacher found:', teacher);
+        
         const currentClasses = teacher?.assignedClasses || [];
         const newClasses = [...currentClasses, classId];
+        
+        console.log('[ASSIGN] Assigning class:', classId);
+        console.log('[ASSIGN] Teacher ID:', teacherId);
+        console.log('[ASSIGN] Current classes:', currentClasses);
+        console.log('[ASSIGN] New classes array:', newClasses);
         
         const response = await authenticatedFetch('/api/auth/assign-classes', {
             method: 'POST',
@@ -2201,6 +2242,7 @@ async function assignClassToTeacher(classId) {
         });
         
         const data = await response.json();
+        console.log('[ASSIGN] Response:', data);
         
         if (data.success) {
             showMessage('assign-message', `Course assigned to ${teacher.name}!`, 'success');
@@ -2209,6 +2251,7 @@ async function assignClassToTeacher(classId) {
             showMessage('assign-message', data.message || 'Failed to assign', 'error');
         }
     } catch (error) {
+        console.error('[ASSIGN] Exception:', error);
         showMessage('assign-message', 'Error: ' + error.message, 'error');
     }
 }

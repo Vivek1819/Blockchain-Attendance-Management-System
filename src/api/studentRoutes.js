@@ -151,29 +151,7 @@ module.exports = function(blockchainManager) {
         }
     });
 
-    // Get student by ID - Public
-    router.get('/:studentId', (req, res) => {
-        try {
-            const student = blockchainManager.getStudent(req.params.studentId);
-            if (!student) {
-                return res.status(404).json({
-                    success: false,
-                    message: 'Student not found'
-                });
-            }
-            res.json({
-                success: true,
-                data: student
-            });
-        } catch (error) {
-            res.status(500).json({
-                success: false,
-                message: error.message
-            });
-        }
-    });
-
-    // Get students by class - Public
+    // Get students by class - Public (MUST be before /:studentId)
     router.get('/class/:classId', (req, res) => {
         try {
             const students = blockchainManager.getStudentsByClass(req.params.classId);
@@ -193,7 +171,7 @@ module.exports = function(blockchainManager) {
         }
     });
 
-    // Get students by department - Public
+    // Get students by department - Public (MUST be before /:studentId)
     router.get('/department/:departmentId', (req, res) => {
         try {
             const students = blockchainManager.getStudentsByDepartment(req.params.departmentId);
@@ -204,6 +182,48 @@ module.exports = function(blockchainManager) {
                     id: student.studentId,
                     name: student.studentName
                 }))
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    });
+
+    // Search students - Public (MUST be before /:studentId)
+    router.get('/search/:searchTerm', (req, res) => {
+        try {
+            const results = blockchainManager.searchStudents(req.params.searchTerm);
+            res.json({
+                success: true,
+                data: results.map(student => ({
+                    ...student,
+                    id: student.studentId,
+                    name: student.studentName
+                }))
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: error.message
+            });
+        }
+    });
+
+    // Get student by ID - Public (MUST be AFTER specific routes)
+    router.get('/:studentId', (req, res) => {
+        try {
+            const student = blockchainManager.getStudent(req.params.studentId);
+            if (!student) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Student not found'
+                });
+            }
+            res.json({
+                success: true,
+                data: student
             });
         } catch (error) {
             res.status(500).json({
@@ -329,25 +349,6 @@ module.exports = function(blockchainManager) {
         }
     });
 
-    // Search students - Public
-    router.get('/search/:searchTerm', (req, res) => {
-        try {
-            const results = blockchainManager.searchStudents(req.params.searchTerm);
-            res.json({
-                success: true,
-                data: results.map(student => ({
-                    ...student,
-                    id: student.studentId,
-                    name: student.studentName
-                }))
-            });
-        } catch (error) {
-            res.status(500).json({
-                success: false,
-                message: error.message
-            });
-        }
-    });
 
     // Get student blockchain - Public
     router.get('/:studentId/blockchain', (req, res) => {
