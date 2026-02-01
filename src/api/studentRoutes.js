@@ -388,5 +388,204 @@ module.exports = function(blockchainManager) {
         }
     });
 
+    /**
+     * POST /api/students/import-csv
+     * Import students from CSV data
+     * CSV Format: name,rollNumber,email,departmentId,classId (optional)
+     */
+    router.post('/import-csv', requireAuth, (req, res) => {
+        try {
+            const userId = req.auth.userId;
+            const userRole = userRoles.getUserRole(userId);
+            const { csvData } = req.body;
+
+            if (!userRole) {
+                return res.status(403).json({
+                    success: false,
+                    message: 'Please complete onboarding first'
+                });
+            }
+
+            if (!csvData || typeof csvData !== 'string') {
+                return res.status(400).json({
+                    success: false,
+                    message: 'CSV data is required'
+                });
+            }
+
+            // Parse CSV data
+            const lines = csvData.trim().split('\n');
+            if (lines.length < 2) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'CSV file must contain header row and at least one data row'
+                });
+            }
+
+            // Parse header
+            const headerLine = lines[0].trim();
+            const headers = headerLine.split(',').map(h => h.trim().toLowerCase());
+            
+            // Validate required headers
+            const requiredHeaders = ['name', 'rollnumber', 'email', 'departmentid'];
+            const missingHeaders = requiredHeaders.filter(h => !headers.includes(h));
+            
+            if (missingHeaders.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Missing required columns: ${missingHeaders.join(', ')}`
+                });
+            }
+
+            // Get column indices
+            const nameIdx = headers.indexOf('name');
+            const rollNumberIdx = headers.indexOf('rollnumber');
+            const emailIdx = headers.indexOf('email');
+            const departmentIdIdx = headers.indexOf('departmentid');
+            const classIdIdx = headers.indexOf('classid');
+
+            const results = {
+                totalRows: lines.length - 1,
+                successCount: 0,
+                failedCount: 0,
+                successfulStudents: [],
+                errors: []
+            };
+
+            // Process each data row
+            for (let i = 1; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) continue; // Skip empty lines
+
+                const values = line.split(',').map(v => v.trim());
+                const rowNum = i + 1;
+
+                try {
+                    // Extract values
+                    const studentName = values[nameIdx];
+                    const rollNumber = values[rollNumberIdx];
+                    const email = values[emailIdx];
+                    const departmentId = values[departmentIdIdx];
+                    const classId = classIdIdx >= 0 ? values[classIdIdx] : null;
+
+                    // Validate required fields
+                    if (!studentName || !rollNumber || !email || !departmentId) {
+                        results.errors.push({
+                            row: rowNum,
+                            data: line,
+                            error: 'Missing required fields'
+                        });
+                        results.failedCount++;
+                        continue;
+                    }
+
+                    // Check department access for teachers
+                    if (userRole.role !== 'admin' && userRole.departmentId !== departmentId) {
+                        results.errors.push({
+                            row: rowNum,
+                            data: line,
+                            error: `You can only create students in your department (${userRole.departmentId})`
+                        });
+                        results.failedCount++;
+                        continue;
+                    }
+
+                    // Validate department exists
+                    const department = blockchainManager.getDepartment(departmentId);
+                    if (!department) {
+                        results.errors.push({
+                            row: rowNum,
+                            data: line,
+                            error: `Department ${departmentId} not found`
+                        });
+                        results.failedCount++;
+                        continue;
+                    }
+
+                    // Check if roll number already exists
+                    const allStudents = blockchainManager.getAllStudents();
+                    const duplicateRoll = allStudents.find(s => s.rollNumber === rollNumber);
+                    if (duplicateRoll) {
+                        results.errors.push({
+                            row: rowNum,
+                            data: line,
+                            error: `Roll number ${rollNumber} already exists`
+                        });
+                        results.failedCount++;
+                        continue;
+                    }
+
+                    // Generate student ID
+                    const studentId = `ST-${Date.now().toString().slice(-6)}-${Math.floor(Math.random() * 1000)}`;
+
+                    // Create student
+                    const student = blockchainManager.createStudent(
+                        studentId,
+                        studentName,
+                        rollNumber,
+                        email,
+                        departmentId,
+                        {}
+                    );
+
+                    // Enroll in class if classId provided
+                    if (classId && classId !== '') {
+                        const classExists = blockchainManager.getClass(classId);
+                        if (classExists) {
+                            try {
+                                blockchainManager.enrollStudent(studentId, classId);
+                            } catch (enrollError) {
+                                // Student created but enrollment failed
+                                results.successfulStudents.push({
+                                    ...student,
+                                    enrollmentWarning: `Student created but failed to enroll in ${classId}: ${enrollError.message}`
+                                });
+                                results.successCount++;
+                                continue;
+                            }
+                        } else {
+                            // Student created but class doesn't exist
+                            results.successfulStudents.push({
+                                ...student,
+                                enrollmentWarning: `Student created but class ${classId} not found`
+                            });
+                            results.successCount++;
+                            continue;
+                        }
+                    }
+
+                    results.successfulStudents.push(student);
+                    results.successCount++;
+
+                } catch (error) {
+                    results.errors.push({
+                        row: rowNum,
+                        data: line,
+                        error: error.message
+                    });
+                    results.failedCount++;
+                }
+            }
+
+            // Save changes to file
+            if (results.successCount > 0) {
+                blockchainManager.saveToFile();
+            }
+
+            res.json({
+                success: true,
+                message: `Import completed: ${results.successCount} successful, ${results.failedCount} failed`,
+                data: results
+            });
+
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                message: 'Error processing CSV import',
+                error: error.message
+            });
+        }
+    });
+
     return router;
 };

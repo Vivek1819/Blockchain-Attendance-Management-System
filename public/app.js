@@ -2294,3 +2294,198 @@ async function unassignClass(classId) {
     }
 }
 
+// ============= CSV Import Functions =============
+
+function openImportCSVModal() {
+    document.getElementById('import-csv-modal').style.display = 'block';
+    document.getElementById('csv-file-input').value = '';
+    document.getElementById('csv-preview-container').style.display = 'none';
+    document.getElementById('import-results').style.display = 'none';
+    document.getElementById('upload-csv-btn').disabled = true;
+    document.getElementById('upload-csv-btn').style.opacity = '0.5';
+}
+
+function closeImportCSVModal() {
+    document.getElementById('import-csv-modal').style.display = 'none';
+}
+
+function downloadCSVTemplate() {
+    const template = 'name,rollNumber,email,departmentId,classId\nJohn Doe,CS2024001,john.doe@example.com,DEPT1,BCCS-001\nJane Smith,CS2024002,jane.smith@example.com,DEPT1,BCCS-001\nAlice Johnson,IT2024001,alice@example.com,DEPT2,\nBob Williams,IT2024002,bob@example.com,DEPT2,';
+    
+    const blob = new Blob([template], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'student_import_template.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+}
+
+function previewCSV() {
+    const fileInput = document.getElementById('csv-file-input');
+    const file = fileInput.files[0];
+    
+    if (!file) {
+        return;
+    }
+    
+    if (!file.name.endsWith('.csv')) {
+        alert('Please select a CSV file');
+        fileInput.value = '';
+        return;
+    }
+    
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const text = e.target.result;
+        const lines = text.trim().split('\n');
+        
+        // Show preview of first 5 rows
+        const previewLines = lines.slice(0, Math.min(6, lines.length));
+        const previewHTML = previewLines.map((line, idx) => {
+            const style = idx === 0 ? 'font-weight: bold; background: #e0f2fe; padding: 5px; margin-bottom: 5px; border-radius: 4px;' : 'padding: 5px; margin-bottom: 2px;';
+            return `<div style="${style}">${line}</div>`;
+        }).join('');
+        
+        document.getElementById('csv-preview').innerHTML = previewHTML + 
+            (lines.length > 6 ? `<div style="padding: 5px; color: #666; font-style: italic;">... and ${lines.length - 6} more rows</div>` : '');
+        document.getElementById('csv-preview-container').style.display = 'block';
+        
+        // Enable upload button
+        document.getElementById('upload-csv-btn').disabled = false;
+        document.getElementById('upload-csv-btn').style.opacity = '1';
+        document.getElementById('upload-csv-btn').style.cursor = 'pointer';
+    };
+    reader.readAsText(file);
+}
+
+async function uploadCSV() {
+    const fileInput = document.getElementById('csv-file-input');
+    const file = fileInput.files[0];
+    
+    if (!file) {
+        alert('Please select a CSV file');
+        return;
+    }
+    
+    // Show loading state
+    const uploadBtn = document.getElementById('upload-csv-btn');
+    uploadBtn.disabled = true;
+    uploadBtn.textContent = 'Importing...';
+    uploadBtn.style.opacity = '0.6';
+    
+    try {
+        const reader = new FileReader();
+        reader.onload = async function(e) {
+            const csvData = e.target.result;
+            
+            try {
+                const response = await authenticatedFetch('/api/students/import-csv', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ csvData })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    displayImportResults(data.data);
+                    loadStudentsList(); // Refresh the students list
+                    loadStats(); // Update stats
+                } else {
+                    alert(`Import failed: ${data.message || 'Unknown error'}`);
+                }
+            } catch (error) {
+                console.error('Import error:', error);
+                alert(`Error: ${error.message}`);
+            } finally {
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = 'Import Students';
+                uploadBtn.style.opacity = '1';
+            }
+        };
+        reader.readAsText(file);
+    } catch (error) {
+        console.error('File read error:', error);
+        alert(`Error reading file: ${error.message}`);
+        uploadBtn.disabled = false;
+        uploadBtn.textContent = 'Import Students';
+        uploadBtn.style.opacity = '1';
+    }
+}
+
+function displayImportResults(results) {
+    const resultsDiv = document.getElementById('import-results');
+    
+    let html = `
+        <div style="background: ${results.failedCount === 0 ? '#d1fae5' : '#fef3c7'}; border-left: 4px solid ${results.failedCount === 0 ? '#10b981' : '#f59e0b'}; padding: 15px; border-radius: 8px;">
+            <h4 style="margin: 0 0 10px 0; color: #1e293b;">Import Results</h4>
+            <div style="display: flex; gap: 20px; margin-bottom: 10px;">
+                <div>
+                    <strong style="color: #10b981;">✅ Successful:</strong> ${results.successCount}
+                </div>
+                ${results.failedCount > 0 ? `
+                    <div>
+                        <strong style="color: #ef4444;">❌ Failed:</strong> ${results.failedCount}
+                    </div>
+                ` : ''}
+            </div>
+    `;
+    
+    if (results.errors && results.errors.length > 0) {
+        html += `
+            <details style="margin-top: 15px; cursor: pointer;">
+                <summary style="font-weight: 600; color: #ef4444; padding: 8px; background: #fee2e2; border-radius: 6px;">
+                    View Errors (${results.errors.length})
+                </summary>
+                <div style="margin-top: 10px; max-height: 200px; overflow-y: auto; background: white; padding: 10px; border-radius: 6px; border: 1px solid #e2e8f0;">
+                    ${results.errors.map(err => `
+                        <div style="padding: 8px; margin-bottom: 8px; background: #fef2f2; border-left: 3px solid #ef4444; border-radius: 4px;">
+                            <div style="font-weight: 600; color: #991b1b;">Row ${err.row}</div>
+                            <div style="color: #dc2626; font-size: 0.9em;">${err.error}</div>
+                            <div style="color: #666; font-size: 0.85em; font-family: monospace; margin-top: 4px;">${err.data}</div>
+                        </div>
+                    `).join('')}
+                </div>
+            </details>
+        `;
+    }
+    
+    // Show warnings for successful students with enrollment issues
+    const studentsWithWarnings = results.successfulStudents.filter(s => s.enrollmentWarning);
+    if (studentsWithWarnings.length > 0) {
+        html += `
+            <details style="margin-top: 15px; cursor: pointer;">
+                <summary style="font-weight: 600; color: #f59e0b; padding: 8px; background: #fef3c7; border-radius: 6px;">
+                    Warnings (${studentsWithWarnings.length})
+                </summary>
+                <div style="margin-top: 10px; max-height: 200px; overflow-y: auto; background: white; padding: 10px; border-radius: 6px; border: 1px solid #e2e8f0;">
+                    ${studentsWithWarnings.map(student => `
+                        <div style="padding: 8px; margin-bottom: 8px; background: #fffbeb; border-left: 3px solid #f59e0b; border-radius: 4px;">
+                            <div style="font-weight: 600; color: #92400e;">${student.name} (${student.rollNumber})</div>
+                            <div style="color: #d97706; font-size: 0.9em;">${student.enrollmentWarning}</div>
+                        </div>
+                    `).join('')}
+                </div>
+            </details>
+        `;
+    }
+    
+    html += `</div>`;
+    
+    resultsDiv.innerHTML = html;
+    resultsDiv.style.display = 'block';
+    
+    // Reset file input only if successful
+    if (results.failedCount === 0) {
+        setTimeout(() => {
+            document.getElementById('csv-file-input').value = '';
+            document.getElementById('csv-preview-container').style.display = 'none';
+            document.getElementById('upload-csv-btn').disabled = true;
+            document.getElementById('upload-csv-btn').style.opacity = '0.5';
+        }, 3000);
+    }
+}
+
